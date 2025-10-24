@@ -3,42 +3,159 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>수도권 지하철 (세부노선 삭제 강화 v7)</title>
+  <title>수도권 지하철 (반응형 v8)</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
+    /* ========================================================== */
+    /* 1. PC 기본 스타일 (원본 파일의 스타일 유지) */
+    /* ========================================================== */
     html, body, #map { height: 100%; margin: 0; }
-    .topbar { position: absolute; z-index: 1001; top: .75rem; left: 50%; transform: translateX(-50%);
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans KR', sans-serif; overflow: hidden; }
+
+    /* PC용 Topbar (지도 상단 중앙 검색창) */
+    .topbar { 
+      position: absolute; z-index: 1001; top: .75rem; left: 50%; transform: translateX(-50%);
       background: rgba(255,255,255,.95); border-radius: 14px; padding: .5rem .75rem;
       font: 14px/1.2 system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans KR', sans-serif;
-      display: flex; gap: .5rem; align-items: center; box-shadow: 0 2px 6px rgba(0,0,0,.06); }
+      display: flex; gap: .5rem; align-items: center; box-shadow: 0 2px 6px rgba(0,0,0,.06); 
+    }
     .topbar input { border: 1px solid #ccc; border-radius: 10px; padding: .35rem .5rem; font-size: 14px; width: 240px; }
-    .station-icon { width: 14px; height: 14px; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 2px rgba(0,0,0,.6); }
-    .label-text { font-size: 13px; font-weight: 600; color: #111; text-shadow: 0 0 2px #fff, 0 0 4px #fff; }
-    .sidebar { position: absolute; right: 0; top: 0; width: 300px; height: 100%;
+
+    /* PC용 Sidebar (우측 노선 목록) */
+    .sidebar { 
+      position: absolute; right: 0; top: 0; width: 300px; height: 100%;
       background: rgba(255,255,255,.98); overflow-y: auto; z-index: 1000;
       font-family: system-ui, -apple-system, 'Noto Sans KR', sans-serif;
       padding: .75rem .75rem 1rem; border-left: 1px solid #e5e5e5;
-      box-shadow: -4px 0 8px rgba(0,0,0,.04); }
+      box-shadow: -4px 0 8px rgba(0,0,0,.04); 
+    }
     .sidebar h3 { font-size: 15px; margin: 0 0 .5rem 0; }
     .line-item { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: .5rem; padding: .25rem .25rem; font-size: 13px; border-radius: 8px; }
     .line-item:hover { background: rgba(0,0,0,.035); }
     .line-dot { width: 14px; height: 14px; border-radius: 50%; border: 1px solid #ddd; }
     .count { font-variant-numeric: tabular-nums; color: #333; }
+    
+    /* 공통 스타일 유지 */
+	.station-icon { 
+    /* (수정) 기본 마커는 흰색으로 통일하고, 테두리(border)를 회색으로 설정 */
+     width: 10px;        /* 마커 크기 축소 */
+     height: 10px;       /* 마커 크기 축소 */
+     border: 1px solid #999; /* 밝은 회색 테두리 */
+     background-color: #fff; /* 배경색은 흰색 */
+     border-radius: 50%; 
+     box-shadow: 0 0 1px rgba(0,0,0,.4); /* 그림자 약하게 */
+	}
+	.label-text { font-size: 13px; font-weight: 600; color: #111; text-shadow: 0 0 2px #fff, 0 0 4px #fff; }    .label-text { font-size: 13px; font-weight: 600; color: #111; text-shadow: 0 0 2px #fff, 0 0 4px #fff; }
+
+    /* ========================================================== */
+    /* 2. 모바일 스타일 (Media Query: 화면 너비 768px 이하) */
+    /* ========================================================== */
+    @media (max-width: 768px) {
+      /* PC용 요소 숨김 (또는 위치 변경) */
+      .topbar { display: none !important; } /* PC용 상단 중앙 검색창 숨김 */
+      .sidebar { display: none !important; } /* PC용 우측 노선 목록 숨김 */
+
+      /* 모바일용 상단 대시보드 */
+      .dashboard {
+        position: absolute; top: 0; left: 0; right: 0; z-index: 1001;
+        background: rgba(255,255,255,1); 
+        padding: 10px 10px 5px;
+        box-shadow: 0 3px 6px rgba(0,0,0,.1);
+      }
+      .completion-rate { margin-bottom: 5px; }
+      .rate-number { font-size: 24px; font-weight: 800; color: #333; }
+      .rate-text { font-size: 16px; font-weight: 500; color: #555; margin-left: 5px; }
+
+      /* 모바일 노선 버튼 */
+      .line-buttons {
+        display: flex; flex-direction: column; gap: 5px;
+        max-height: 200px; overflow-y: auto; padding-bottom: 5px;
+      }
+      .line-group {
+        display: flex; flex-wrap: wrap; gap: 8px;
+      }
+      .line-button {
+        border: none; color: white; font-weight: 700; cursor: pointer; text-align: center;
+        transition: opacity 0.2s;
+        box-shadow: 0 1px 3px rgba(0,0,0,.15);
+      }
+      .main-lines .line-button {
+        width: 38px; height: 38px; border-radius: 50%;
+        font-size: 16px; line-height: 38px; padding: 0;
+      }
+      .other-lines .line-button {
+        border-radius: 20px; font-size: 12px; padding: 6px 12px; min-width: 60px;
+      }
+      
+      /* 모바일용 검색창 (대시보드 아래) */
+      .search-box {
+          position: absolute;
+          top: 260px; /* **이 값은 모바일 대시보드의 예상 높이(약 170~200px)에 맞춰 조정** */
+          left: 15px;
+          right: 15px;
+          display: flex; /* Flex로 변경 */
+          background-color: white;
+          border-radius: 10px;
+          padding: 5px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+          z-index: 10003; 
+      }
+      .station-input {
+          flex: 1; border: none; padding: 10px 15px; font-size: 16px; outline: none;
+      }
+      .options-button {
+          background: none; border: none; font-size: 20px; padding: 0 10px; color: #888; cursor: pointer;
+      }
+    }
+    
+    /* 기본적으로 모바일 UI는 숨김 처리 (PC에서 보이지 않도록) */
+    .dashboard, .search-box {
+        display: none; 
+    }
+    /* 단, 모바일 뷰에서는 보이도록 설정 */
+    @media (max-width: 768px) {
+        .dashboard, .search-box {
+            display: block; /* 모바일에서 다시 보이게 함 */
+        }
+        /* search-box는 flex로 설정해야 내부 요소가 정렬됨 */
+        .search-box {
+            display: flex;
+        }
+    }
+
   </style>
 </head>
 <body>
   <div id="map"></div>
+
   <div class="topbar">
     <strong>수도권 지하철</strong>
-    <input type="text" id="stationSearch" placeholder="역 이름을 입력" />
+    <input type="text" id="stationSearchPC" placeholder="역 이름을 입력" />
   </div>
+  
   <div class="sidebar">
     <h3>노선 목록</h3>
     <div id="lineList"></div>
   </div>
 
+  <div class="dashboard">
+    <div class="completion-rate">
+        <span class="rate-number" id="totalRate">0.0 %</span>
+        <span class="rate-text">역 발견됨</span>
+    </div>
+    <div class="line-buttons" id="lineButtons">
+        </div>
+  </div>
+
+  <div class="search-box">
+    <input type="text" id="stationSearchMobile" placeholder="역 이름을 입력" class="station-input" />
+    <button class="options-button">⋮</button>
+  </div>
+
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
+    // 노선 색상, toCanonicalLine, normStationKey, fetchOverpass, parseData, sortLineEntries, drawLines, nearestLine, computeTotals 함수는 동일하게 유지
     const map = L.map('map').setView([37.56, 126.98], 11);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
 
@@ -51,87 +168,42 @@
       out body; >; out geom;`;
 
     const colorMap = {
-      "1호선": "#00498B","2호선": "#009246","3호선": "#F36630","4호선": "#00A2D1","5호선": "#A664A3",
+      "1호선": "#0052A4","2호선": "#00A84D","3호선": "#EF7C1E","4호선": "#00A2D1","5호선": "#A664A3",
       "6호선": "#9E4510","7호선": "#5D6519","8호선": "#D6406A","9호선": "#8E764B",
       "수인·분당선": "#E0A134","경의·중앙선": "#2ABFD0","공항철도": "#006D9D","신분당선": "#BB1834",
-      "경강선": "#003DA5","경춘선": "#0C8E72","서해선": "#81A914","신안산선": "#F04938",
+      "경강선": "#003DA5","경춘선": "#0C8E72","서해선": "#81A914",
       "김포골드라인": "#A17800","의정부경전철": "#FDA600","용인경전철": "#509F22","우이신설선": "#B0CE18",
       "신림선": "#6789CA","인천1호선": "#6E98BB","인천2호선": "#ED8B00"
     };
 
-    // 세부노선 삭제 + 본노선 매핑 (강화)
     function toCanonicalLine(raw=""){
       let n = (raw||"").toString().normalize("NFKC");
-
-      // 공통 전처리
-      n = n
-        .replace(/:.*/g, "")                              // ':출발→도착' 제거
-        .replace(/\(.*?\)/g, "")                        // 괄호 제거
-        .replace(/내선|외선|상행|하행|상선|하선|inbound|outbound/gi, "")
-        .replace(/[·\.‧∙・․]/g, "·")
-        .replace(/\s+/g, " ")
-        .trim();
-
-      // === 세부노선 삭제 규칙 강화 ===
-      // 단어 단위 제거: '성수지선', '신설지선', '급행', '셔틀', '셔틀트레인', '직통', '계통' 등
-      n = n
-        .replace(/(성수\s*지선|신설\s*지선|지선)/g, "")
-        .replace(/(급행|익스프레스|express)/ig, "")
-        .replace(/(셔틀|셔틀트레인|shuttle)/ig, "")
-        .replace(/(직통|직통열차|direct)/ig, "")
-        .replace(/계통/g, "")
-        .replace(/\s+/g, " ")
-        .trim();
-
-      // 접두사 표준화: 상위 노선 식별을 돕기 위해 군더더기 제거
-      n = n
-        .replace(/^수도권 ?전철\s*/g, "")
-        .replace(/^서울 ?(지하철|경전철)\s*/g, "")
-        .replace(/^인천국제공항철도\s*/g, "공항철도 ")
-        .trim();
-
-      // === 예외/우선 규칙 ===
-      if (/^신분당선/.test(n)) return "신분당선"; // 신분당선은 항상 독립
-
-      // === 대표 노선 매핑 ===
+      n = n.replace(/:.*/g, "").replace(/\(.*?\)/g, "").replace(/내선|외선|상행|하행|상선|하선|inbound|outbound/gi, "").replace(/[·\.‧∙・․]/g, "·").replace(/\s+/g, " ").trim();
+      n = n.replace(/(성수\s*지선|신설\s*지선|지선)/g, "").replace(/(급행|익스프레스|express)/ig, "").replace(/(셔틀|셔틀트레인|shuttle)/ig, "").replace(/(직통|직통열차|direct)/ig, "").replace(/계통/g, "").replace(/\s+/g, " ").trim();
+      n = n.replace(/^수도권 ?전철\s*/g, "").replace(/^서울 ?(지하철|경전철)\s*/g, "").replace(/^인천국제공항철도\s*/g, "공항철도 ").trim();
+      if (/^신분당선/.test(n)) return "신분당선";
       if (/^1호선/.test(n) || /\b1\s*호선\b/.test(n)) return "1호선";
       if (/^2호선/.test(n) || /\b2\s*호선\b/.test(n)) return "2호선";
       if (/^9호선/.test(n) || /\b9\s*호선\b/.test(n)) return "9호선";
-
-      // 수인·분당선 (신분당선과 구분)
       if (/^(수인.?분당선|분당선)$/.test(n)) return "수인·분당선";
-
-      // 경의·중앙선
       if (/(경의.?중앙선)/.test(n)) return "경의·중앙선";
-
-      // 공항철도 (AREX 포함)
       if (/인천국제공항|AREX|공항철도/i.test(n)) return "공항철도";
-
-      // 인천 도시철도
       if (/인천.?1호선/.test(n)) return "인천1호선";
       if (/인천.?2호선/.test(n)) return "인천2호선";
-
-      // 신림선
       if (/신림선/.test(n)) return "신림선";
-
-      // 그 외는 원형 유지 (여전히 세부 키워드 삭제된 상태)
       return n;
     }
-
     function normStationKey(s=""){
       return s.trim().normalize('NFKC').replace(/[\(\)\[\]{}]/g,'').replace(/\s+/g,'').replace(/[·\.‧∙・․]/g,'·').replace(/역$/,'').toLowerCase();
     }
-
     async function fetchOverpass(query){
       const res = await fetch('https://overpass-api.de/api/interpreter', { method:'POST', body: query });
       if(!res.ok) throw new Error('Overpass 오류: ' + res.status);
       return res.json();
     }
-
     function parseData(data){
       const wayMap = new Map();
       (data.elements||[]).forEach(el=>{ if(el.type==='way'&&el.geometry) wayMap.set(el.id, el.geometry.map(p=>[p.lat,p.lon])); });
-
       const lineMap=new Map(); const stations=[];
       (data.elements||[]).forEach(el=>{
         const t=el.tags||{};
@@ -153,14 +225,33 @@
       const seen=new Set(), dedup=[]; stations.forEach(s=>{if(!seen.has(s.key)){seen.add(s.key);dedup.push(s);}});
       return {lines:Array.from(lineMap.values()), stations:dedup};
     }
-
     function sortLineEntries(entries){
       function keyFor(name){const m=name.match(/^(\d+)호선$/);if(m)return{type:'num',val:parseInt(m[1],10)};return{type:'txt',val:name};}
       return entries.sort(([aName],[bName])=>{const A=keyFor(aName),B=keyFor(bName);if(A.type!==B.type)return A.type==='num'?-1:1;if(A.type==='num')return A.val-B.val;return aName.localeCompare(bName,'ko');});
     }
 
+	function drawBaseMarkers(stations) {
+        // 흰색 기본 마커 아이콘 정의 (CSS에서 흰색으로 정의했기 때문에 별도 style 지정 불필요)
+        const baseIcon = L.divIcon({
+            className: 'base-station-marker',
+            html: `<div class='station-icon'></div>`,
+            iconSize: [12, 12],      /* 크기는 CSS의 10px + 테두리 1px에 맞게 */
+            iconAnchor: [6, 6]       /* 중앙 정렬 */
+        });
+
+        stations.forEach(s => {
+            // 마커를 추가하지만, 나중에 검색으로 발견한 마커(노선색 마커)와 겹치지 않도록
+            // zIndexOffset을 낮게 설정합니다.
+            L.marker([s.lat, s.lon], { 
+                icon: baseIcon,
+                zIndexOffset: 100 // 검색 마커보다 낮게 설정
+            }).addTo(map);
+        });
+    }
     let subwayData={lines:[],stations:[]};
     const shownStations=new Map(), lineStats={};
+    let totalStationsCount = 0;
+    let matchedStationsCount = 0;
 
     function drawLines(lines){
       lines.forEach(Ln=>{
@@ -168,17 +259,33 @@
         Ln.segs.forEach(seg=>{if(Array.isArray(seg)&&seg.length)L.polyline(seg,{color:Ln.color,weight:6,opacity:0.95,lineCap:'round'}).addTo(map);});
       });
     }
-
     function nearestLine(lat,lon){
       let best={d2:Infinity,color:'#003DA5',name:null};
       subwayData.lines.forEach(Ln=>{Ln.segs.forEach(seg=>{for(let i=0;i<seg.length;i++){const p=seg[i];const d2=(lat-p[0])**2+(lon-p[1])**2;if(d2<best.d2)best={d2,color:Ln.color,name:Ln.name};}});});
       return best;
     }
-
     function computeTotals(){
-      subwayData.stations.forEach(s=>{const near=nearestLine(s.lat,s.lon);if(near.name){if(!lineStats[near.name])lineStats[near.name]={total:0,matched:0,color:near.color};lineStats[near.name].total+=1;}});
+      const tempTotals = {};
+      subwayData.stations.forEach(s=>{
+        const near=nearestLine(s.lat,s.lon);
+        if(near.name){
+            tempTotals[near.name] = (tempTotals[near.name] || 0) + 1;
+        }
+      });
+      totalStationsCount = 0;
+      Object.entries(tempTotals).forEach(([name, count]) => {
+          if (!lineStats[name]) {
+              const lineData = subwayData.lines.find(l => l.name === name);
+              lineStats[name] = { total: 0, matched: 0, color: (lineData ? lineData.color : colorMap[name] || '#003DA5') };
+          }
+          lineStats[name].total = count;
+          totalStationsCount += count;
+      });
     }
 
+    /* ------------------------------------------------ */
+    /* PC 환경: 사이드바 업데이트 함수 (기존 로직) */
+    /* ------------------------------------------------ */
     function updateSidebar(){
       const container=document.getElementById('lineList');
       container.innerHTML='';
@@ -186,42 +293,152 @@
       entries.forEach(([name,s])=>{
         const div=document.createElement('div');
         div.className='line-item';
+        // PC 사이드바에서는 발견 역 개수를 표시합니다.
         div.innerHTML=`<div class='line-dot' style='background:${s.color}'></div><div>${name}</div><div class='count'>${s.matched} / ${s.total}</div>`;
         container.appendChild(div);
       });
     }
+    
+	const MAX_DISTANCE_SQ = 0.000004; // 0.002 * 0.002 = 0.000004 (경위도 제곱 거리)
+
+    function getNearbyLines(lat, lon) {
+        const nearbyLines = new Set();
+        subwayData.lines.forEach(Ln => {
+            let isNearby = false;
+            // 노선의 모든 선분(Segments)을 확인합니다.
+            for (const seg of Ln.segs) {
+                // 선분의 모든 점을 확인합니다.
+                for (const p of seg) {
+                    const d2 = (lat - p[0]) ** 2 + (lon - p[1]) ** 2;
+                    if (d2 < MAX_DISTANCE_SQ) {
+                        nearbyLines.add(Ln.name); // 근처에 있으면 해당 노선 이름 추가
+                        isNearby = true;
+                        break; // 해당 노선은 찾았으니 다음 노선으로 넘어감
+                    }
+                }
+                if (isNearby) break;
+            }
+        });
+        return Array.from(nearbyLines);
+    }
+
+    /* ------------------------------------------------ */
+    /* 모바일 환경: 대시보드 업데이트 함수 (새로운 로직) */
+    /* ------------------------------------------------ */
+    function updateDashboard(){
+      const container=document.getElementById('lineButtons');
+      if (!container) return; // 요소가 없으면(PC 환경이면) 실행하지 않음
+
+      container.innerHTML='';
+
+      // 1. 전체 발견율 계산 및 업데이트
+      matchedStationsCount = 0;
+      Object.values(lineStats).forEach(s => { matchedStationsCount += s.matched; });
+
+      const totalRateElement = document.getElementById('totalRate');
+      const rate = totalStationsCount > 0 ? (matchedStationsCount / totalStationsCount) * 100 : 0;
+      if (totalRateElement) totalRateElement.textContent = `${rate.toFixed(1)} %`;
+
+      // 2. 노선 버튼 그룹 생성 (모바일용)
+      const entries=sortLineEntries(Object.entries(lineStats));
+
+      const mainLinesDiv = document.createElement('div');
+      mainLinesDiv.className = 'line-group main-lines';
+
+      const otherLinesDiv = document.createElement('div');
+      otherLinesDiv.className = 'line-group other-lines';
+
+      entries.forEach(([name,s])=>{
+        const btn=document.createElement('button');
+        btn.className='line-button';
+        btn.style.backgroundColor=s.color;
+
+        const isMainLine = name.match(/^(\d+)호선$/) && parseInt(name.match(/^(\d+)호선$/)[1]) <= 9;
+        
+        if (isMainLine) {
+            btn.textContent = name.replace('호선', '');
+            mainLinesDiv.appendChild(btn);
+        } else {
+            btn.textContent = name; 
+            otherLinesDiv.appendChild(btn);
+        }
+      });
+      
+      container.appendChild(mainLinesDiv);
+      container.appendChild(otherLinesDiv);
+    }
+
+    /* ------------------------------------------------ */
+    /* 통합 업데이트 함수 (환경에 따라 호출) */
+    /* ------------------------------------------------ */
+    function updateUI(){
+        // 화면 너비에 따라 다른 UI 업데이트 함수 호출
+        if (window.innerWidth <= 768) {
+            updateDashboard();
+        } else {
+            updateSidebar();
+        }
+    }
+
 
     async function init(){
       try{
         const raw=await fetchOverpass(overpassQuery);
         subwayData=parseData(raw);
         drawLines(subwayData.lines);
-        computeTotals();
-        updateSidebar();
+        computeTotals(); 
+		drawBaseMarkers(subwayData.stations);
+        updateUI(); // 초기 UI 업데이트 (반응형)
+        
         const bounds=L.latLngBounds([]);
         subwayData.lines.forEach(Ln=>Ln.segs.forEach(seg=>seg.forEach(p=>bounds.extend(p))));
         if(bounds.isValid())map.fitBounds(bounds.pad(0.05));
       }catch(e){alert('초기화 오류: '+e.message);console.error(e);}
     }
 
-    const input=document.getElementById('stationSearch');
-    input.addEventListener('keypress',e=>{
+    // ********* 검색 입력 처리 로직 수정 *********
+    const inputPC = document.getElementById('stationSearchPC');
+    const inputMobile = document.getElementById('stationSearchMobile');
+    
+    const searchHandler = (e, inputElement) => {
       if(e.key==='Enter'){
-        const key=normStationKey(input.value.replace(/\./g,'·'));
+        const key=normStationKey(inputElement.value.replace(/\./g,'·'));
         if(!key)return;
         const found=subwayData.stations.find(s=>s.key===key);
         if(!found){alert('정확히 일치하는 역명을 찾을 수 없습니다.');return;}
+        
         if(!shownStations.has(key)){
-          const near=nearestLine(found.lat,found.lon);
-          const icon=L.divIcon({className:'',html:`<div class='station-icon' style='background:${near.color}'></div>`,iconSize:[14,14],iconAnchor:[7,7]});
-          const m=L.marker([found.lat,found.lon],{icon}).addTo(map);
+          const nearest=nearestLine(found.lat,found.lon);
+		  const connectingLines = getNearbyLines(found.lat, found.lon);
+		  const icon=L.divIcon({
+              className:'',
+              html:`<div class='station-icon' style='background-color:${nearest.color}; border: 2px solid #fff; width:14px; height:14px;'></div>`,
+              iconSize:[14,14],
+              iconAnchor:[7,7]
+          });    
+		  const m=L.marker([found.lat,found.lon],{icon, zIndexOffset: 1000 }).addTo(map);
           L.tooltip({permanent:true,direction:'top',className:'label-text'}).setLatLng([found.lat,found.lon]).setContent(found.name).addTo(map);
           shownStations.set(key,m);
-          if(near.name){lineStats[near.name]=lineStats[near.name]||{total:0,matched:0,color:near.color};lineStats[near.name].matched+=1;updateSidebar();}
+
+		  connectingLines.forEach(name => {
+              if(name) {
+                  lineStats[name] = lineStats[name] || {total:0, matched:0, color: colorMap[name] || '#003DA5'};
+                  lineStats[name].matched += 1;
+              }
+          });
+          // **********************************
+
+          updateUI();
         }
-        input.value='';map.panTo([found.lat,found.lon]);
+        inputElement.value='';map.panTo([found.lat,found.lon]);
       }
-    });
+    };
+
+    if (inputPC) inputPC.addEventListener('keypress', e => searchHandler(e, inputPC));
+    if (inputMobile) inputMobile.addEventListener('keypress', e => searchHandler(e, inputMobile));
+    
+    // 화면 크기 변경 시 UI 업데이트 (PC-모바일 전환 시)
+    window.addEventListener('resize', updateUI);
 
     init();
   </script>
