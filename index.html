@@ -276,7 +276,7 @@
 
 		  // 거리 기준 $d^2 < 0.0001$ (신망리역은 걸러지고 평택은 삽니다)
 		  // 노선 정보가 아예 없는 예외 상황이면 일단 다 보여줍니다.
-		  if (linesArray.length === 0 || minD2 < 0.0001) {
+		  if (linesArray.length === 0 || minD2 < 0.0005) {
 			seen.add(s.key);
 			dedup.push(s);
 		  }
@@ -337,24 +337,25 @@
 		  }
 		  return best;
 }
-    function computeTotals(){
-      const tempTotals = {};
-      subwayData.stations.forEach(s=>{
-        const near=nearestLine(s.lat,s.lon);
-        if(near.name){
-            tempTotals[near.name] = (tempTotals[near.name] || 0) + 1;
-        }
-      });
-      totalStationsCount = 0;
-      Object.entries(tempTotals).forEach(([name, count]) => {
-          if (!lineStats[name]) {
-              const lineData = subwayData.lines.find(l => l.name === name);
-              lineStats[name] = { total: 0, matched: 0, color: (lineData ? lineData.color : colorMap[name] || '#003DA5') };
-          }
-          lineStats[name].total = count;
-          totalStationsCount += count;
-      });
-    }
+	function computeTotals(){
+	  // 모든 노선의 total 초기화
+	  Object.keys(lineStats).forEach(name => {
+		  lineStats[name].total = 0;
+	  });
+
+	  totalStationsCount = subwayData.stations.length; // 중복 없는 전체 고유 역 개수
+
+	  subwayData.stations.forEach(s => {
+		// 해당 역이 반경 내에 포함된 모든 노선을 찾습니다.
+		const nearbyLines = getNearbyLines(s.lat, s.lon); 
+		
+		nearbyLines.forEach(lineName => {
+		  if (lineStats[lineName]) {
+			lineStats[lineName].total += 1; // 우이신설선 포함 모든 해당 노선의 total 증가
+		  }
+		});
+	  });
+	}
 
     /* ------------------------------------------------ */
     /* PC 환경: 사이드바 업데이트 함수 (기존 로직) */
