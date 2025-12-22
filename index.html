@@ -45,8 +45,14 @@
      border-radius: 50%; 
      box-shadow: 0 0 1px rgba(0,0,0,.4); /* 그림자 약하게 */
 	}
-	.label-text { font-size: 13px; font-weight: 600; color: #111; text-shadow: 0 0 2px #fff, 0 0 4px #fff; }    .label-text { font-size: 13px; font-weight: 600; color: #111; text-shadow: 0 0 2px #fff, 0 0 4px #fff; }
-
+	.label-text {background-color: transparent; border: none; box-shadow: none; font-size: 13px; font-weight: 800; color: #111; text-shadow: 0 0 2px #fff, 0 0 4px #fff; white-space: nowrap;}    
+	.label-text {background-color: transparent; border: none; box-shadow: none; font-size: 13px; font-weight: 800; color: #111; text-shadow: 0 0 2px #fff, 0 0 4px #fff; white-space: nowrap;}
+	.leaflet-tooltip-top.label-text::before,
+	.leaflet-tooltip-bottom.label-text::before,
+	.leaflet-tooltip-left.label-text::before,
+	.leaflet-tooltip-right.label-text::before {
+		border: none !important;
+	}
     /* ========================================================== */
     /* 2. 모바일 스타일 (Media Query: 화면 너비 768px 이하) */
     /* ========================================================== */
@@ -156,16 +162,19 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     // 노선 색상, toCanonicalLine, normStationKey, fetchOverpass, parseData, sortLineEntries, drawLines, nearestLine, computeTotals 함수는 동일하게 유지
-    const map = L.map('map').setView([37.56, 126.98], 11);
+    const map = L.map('map', {
+    renderer: L.canvas() // 이 한 줄이 랙을 엄청나게 줄여줍니다!
+	}).setView([37.56, 126.98], 11);
+	
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
 
-    const bbox = [36.9, 126.4, 38.3, 127.9];
-    const overpassQuery = `[out:json][timeout:150];
+	const bbox = [36.7, 126.4, 38.3, 127.9];
+    const overpassQuery = `[out:json][timeout:300];
       (relation["type"="route"]["route"~"^(subway|light_rail|monorail|tram|metro)$"](${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
        way["railway"~"^(subway|light_rail|monorail|tram|metro)$"](${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
        node["railway"="station"](${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
       );
-      out body; >; out geom;`;
+	out body; >; out geom;`;
 
     const colorMap = {
       "1호선": "#0052A4","2호선": "#00A84D","3호선": "#EF7C1E","4호선": "#00A2D1","5호선": "#A664A3",
@@ -181,6 +190,7 @@
       n = n.replace(/:.*/g, "").replace(/\(.*?\)/g, "").replace(/내선|외선|상행|하행|상선|하선|inbound|outbound/gi, "").replace(/[·\.‧∙・․]/g, "·").replace(/\s+/g, " ").trim();
       n = n.replace(/(성수\s*지선|신설\s*지선|지선)/g, "").replace(/(급행|익스프레스|express)/ig, "").replace(/(셔틀|셔틀트레인|shuttle)/ig, "").replace(/(직통|직통열차|direct)/ig, "").replace(/계통/g, "").replace(/\s+/g, " ").trim();
       n = n.replace(/^수도권 ?전철\s*/g, "").replace(/^서울 ?(지하철|경전철)\s*/g, "").replace(/^인천국제공항철도\s*/g, "공항철도 ").trim();
+	  if (/월미바다열차|월미궤도선/.test(n)) return "";
       if (/^신분당선/.test(n)) return "신분당선";
       if (/^1호선/.test(n) || /\b1\s*호선\b/.test(n)) return "1호선";
       if (/^2호선/.test(n) || /\b2\s*호선\b/.test(n)) return "2호선";
@@ -201,30 +211,80 @@
       if(!res.ok) throw new Error('Overpass 오류: ' + res.status);
       return res.json();
     }
-    function parseData(data){
       const wayMap = new Map();
-      (data.elements||[]).forEach(el=>{ if(el.type==='way'&&el.geometry) wayMap.set(el.id, el.geometry.map(p=>[p.lat,p.lon])); });
-      const lineMap=new Map(); const stations=[];
-      (data.elements||[]).forEach(el=>{
-        const t=el.tags||{};
-        if(el.type==='relation' && /^(subway|light_rail|monorail|tram|metro)$/.test(t.route||'')){
-          const raw=t['name:ko']||t.name||t.ref||'';
-          const name=toCanonicalLine(raw);
-          if(!name) return;
-          const color=colorMap[name]||t.colour||t.color||"#003DA5";
-          if(!lineMap.has(name)) lineMap.set(name,{name,color,segs:[]});
-          if(Array.isArray(el.members)) el.members.forEach(m=>{
-            if(m&&m.type==='way'&&wayMap.has(m.ref)) lineMap.get(name).segs.push(wayMap.get(m.ref));
-          });
-        }
-        if(el.type==='node'&&t.railway==='station'){
-          const n=t['name:ko']||t.name||'';
-          if(n) stations.push({name:n,key:normStationKey(n),lat:el.lat,lon:el.lon});
-        }
-      });
-      const seen=new Set(), dedup=[]; stations.forEach(s=>{if(!seen.has(s.key)){seen.add(s.key);dedup.push(s);}});
-      return {lines:Array.from(lineMap.values()), stations:dedup};
-    }
+	
+	function parseData(data) {
+	  const wayMap = new Map();
+	  const lineMap = new Map();
+	  const rawStations = [];
+
+	  // 1. 길(Way)의 좌표 데이터를 먼저 싹 긁어모읍니다.
+	  (data.elements || []).forEach(el => {
+		if (el.type === 'way' && el.geometry) {
+		  wayMap.set(el.id, el.geometry.map(p => [p.lat, p.lon]));
+		}
+	  });
+
+	  // 2. 노선(Relation)과 역(Node) 정보를 정리합니다.
+	  (data.elements || []).forEach(el => {
+		const t = el.tags || {};
+		
+		// 노선 정리
+		if (el.type === 'relation' && t.route) {
+		  const raw = t['name:ko'] || t.name || t.ref || '';
+		  const name = toCanonicalLine(raw);
+		  if (!name) return;
+
+		  const color = colorMap[name] || t.colour || t.color || "#003DA5";
+		  if (!lineMap.has(name)) lineMap.set(name, { name, color, segs: [] });
+
+		  if (Array.isArray(el.members)) {
+			el.members.forEach(m => {
+			  // 여기서 중요함더! wayMap에 좌표가 있으면 segs에 넣습니다.
+			  if (m.type === 'way' && wayMap.has(m.ref)) {
+				lineMap.get(name).segs.push(wayMap.get(m.ref));
+			  }
+			});
+		  }
+		}
+		
+		// 역 정리
+		if (el.type === 'node' && t.railway === 'station') {
+		  const n = t['name:ko'] || t.name || '';
+		  if (n) rawStations.push({ name: n, key: normStationKey(n), lat: el.lat, lon: el.lon });
+		}
+	  });
+
+	  const linesArray = Array.from(lineMap.values());
+	  const seen = new Set(), dedup = [];
+
+	  // 3. 역 필터링 (노선 근처 1km 이내만 살리기)
+	  rawStations.forEach(s => {
+		if (!seen.has(s.key)) {
+		  let minD2 = Infinity;
+		  // 노선이 있어야 거리를 잽니다.
+		  if (linesArray.length > 0) {
+			for (const Ln of linesArray) {
+			  for (const seg of Ln.segs) {
+				for (const p of seg) {
+				  const d2 = (s.lat - p[0]) ** 2 + (s.lon - p[1]) ** 2;
+				  if (d2 < minD2) minD2 = d2;
+				}
+			  }
+			}
+		  }
+
+		  // 거리 기준 $d^2 < 0.0001$ (신망리역은 걸러지고 평택은 삽니다)
+		  // 노선 정보가 아예 없는 예외 상황이면 일단 다 보여줍니다.
+		  if (linesArray.length === 0 || minD2 < 0.0001) {
+			seen.add(s.key);
+			dedup.push(s);
+		  }
+		}
+	  });
+
+	  return { lines: linesArray, stations: dedup };
+	}
     function sortLineEntries(entries){
       function keyFor(name){const m=name.match(/^(\d+)호선$/);if(m)return{type:'num',val:parseInt(m[1],10)};return{type:'txt',val:name};}
       return entries.sort(([aName],[bName])=>{const A=keyFor(aName),B=keyFor(bName);if(A.type!==B.type)return A.type==='num'?-1:1;if(A.type==='num')return A.val-B.val;return aName.localeCompare(bName,'ko');});
@@ -259,11 +319,24 @@
         Ln.segs.forEach(seg=>{if(Array.isArray(seg)&&seg.length)L.polyline(seg,{color:Ln.color,weight:6,opacity:0.95,lineCap:'round'}).addTo(map);});
       });
     }
-    function nearestLine(lat,lon){
-      let best={d2:Infinity,color:'#003DA5',name:null};
-      subwayData.lines.forEach(Ln=>{Ln.segs.forEach(seg=>{for(let i=0;i<seg.length;i++){const p=seg[i];const d2=(lat-p[0])**2+(lon-p[1])**2;if(d2<best.d2)best={d2,color:Ln.color,name:Ln.name};}});});
-      return best;
-    }
+	function nearestLine(lat, lon) {
+		let best = { d2: Infinity, color: '#003DA5', name: null };
+		  
+		  // 데이터가 아직 안 불러와졌으면 기본값 뱉고 튑니다.
+		  if (!subwayData || !subwayData.lines) return best;
+
+		  for (const Ln of subwayData.lines) {
+			for (const seg of Ln.segs) {
+			  for (const p of seg) {
+				const d2 = (lat - p[0]) ** 2 + (lon - p[1]) ** 2;
+				if (d2 < best.d2) {
+				  best = { d2, color: Ln.color, name: Ln.name };
+				}
+			  }
+			}
+		  }
+		  return best;
+}
     function computeTotals(){
       const tempTotals = {};
       subwayData.stations.forEach(s=>{
@@ -384,7 +457,12 @@
     async function init(){
       try{
         const raw=await fetchOverpass(overpassQuery);
+		console.log("Raw Data:", raw); // 데이터 들어오는지 확인용
         subwayData=parseData(raw);
+		console.log("Parsed Data:", subwayData); // 파싱 잘 됐나 확인용
+		if (subwayData.lines.length === 0) {
+       console.warn("노선 데이터가 없심더! BBox나 쿼리를 확인해보이소.");
+    }
         drawLines(subwayData.lines);
         computeTotals(); 
 		drawBaseMarkers(subwayData.stations);
