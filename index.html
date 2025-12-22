@@ -251,7 +251,7 @@
 		// 역 정리
 		if (el.type === 'node' && t.railway === 'station') {
 		  const n = t['name:ko'] || t.name || '';
-		  if (n) rawStations.push({ name: n, key: normStationKey(n), lat: el.lat, lon: el.lon });
+		  if (n && n !== '원릉') rawStations.push({ name: n, key: normStationKey(n), lat: el.lat, lon: el.lon });
 		}
 	  });
 
