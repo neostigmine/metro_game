@@ -161,6 +161,15 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
+	const MANUAL_STATIONS = [
+  {
+    id: "manual:gyeonggang:chowol",
+    name: "초월",
+    line: "경강선",
+    lat: 37.37,
+    lon: 127.29,
+  },
+];
     // 노선 색상, toCanonicalLine, normStationKey, fetchOverpass, parseData, sortLineEntries, drawLines, nearestLine, computeTotals 함수는 동일하게 유지
     const map = L.map('map', {
     renderer: L.canvas() // 이 한 줄이 랙을 엄청나게 줄여줍니다!
@@ -169,12 +178,43 @@
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
 
 	const bbox = [36.7, 126.4, 38.3, 127.9];
-    const overpassQuery = `[out:json][timeout:300];
-      (relation["type"="route"]["route"~"^(subway|light_rail|monorail|tram|metro)$"](${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
-       way["railway"~"^(subway|light_rail|monorail|tram|metro)$"](${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
-       node["railway"="station"](${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
-      );
-	out body; >; out geom;`;
+const overpassQuery = `[out:json][timeout:300];
+(
+  relation["type"="route"]["route"~"^(subway|metro|light_rail|tram|monorail|train|railway)$"]
+    (${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]})
+    ->.routes;
+
+
+relation(17413295)->.gtxa;
+(.gtxa; >>;);
+
+  way(r.routes);
+
+
+  way["railway"~"^(subway|light_rail|monorail|tram|metro)$"]
+    (${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
+
+  way["railway"~"^(subway|light_rail|monorail|tram|metro|rail)$"]
+    ["service"~"^(subway|metro|urban|commuter|high_speed)$"]
+    (${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
+
+  node["railway"~"^(station|halt|tram_stop)$"]["amenity"!="bus_station"]
+    (${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
+
+  node["public_transport"="stop_position"]
+    ["railway"~"^(stop|station|halt|tram_stop|rail)$"]
+    ["amenity"!="bus_station"]
+    (${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
+	way["railway"~"^(station|halt)$"]["amenity"!="bus_station"](${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
+relation["public_transport"="stop_area"]["amenity"!="bus_station"](${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
+relation["public_transport"="station"]["amenity"!="bus_station"](${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
+
+);
+out body;
+>;
+out geom;`
+
+
 
     const colorMap = {
       "1호선": "#0052A4","2호선": "#00A84D","3호선": "#EF7C1E","4호선": "#00A2D1","5호선": "#A664A3",
@@ -182,109 +222,241 @@
       "수인·분당선": "#E0A134","경의·중앙선": "#2ABFD0","공항철도": "#006D9D","신분당선": "#BB1834",
       "경강선": "#003DA5","경춘선": "#0C8E72","서해선": "#81A914",
       "김포골드라인": "#A17800","의정부경전철": "#FDA600","용인경전철": "#509F22","우이신설선": "#B0CE18",
-      "신림선": "#6789CA","인천1호선": "#6E98BB","인천2호선": "#ED8B00"
+      "신림선": "#6789CA","인천1호선": "#6E98BB","인천2호선": "#ED8B00", "GTX-A":"#9A6292",
     };
-
-    function toCanonicalLine(raw=""){
+	
+function toCanonicalLine(raw=""){
       let n = (raw||"").toString().normalize("NFKC");
+      // 잡다한 수식어 제거
       n = n.replace(/:.*/g, "").replace(/\(.*?\)/g, "").replace(/내선|외선|상행|하행|상선|하선|inbound|outbound/gi, "").replace(/[·\.‧∙・․]/g, "·").replace(/\s+/g, " ").trim();
       n = n.replace(/(성수\s*지선|신설\s*지선|지선)/g, "").replace(/(급행|익스프레스|express)/ig, "").replace(/(셔틀|셔틀트레인|shuttle)/ig, "").replace(/(직통|직통열차|direct)/ig, "").replace(/계통/g, "").replace(/\s+/g, " ").trim();
       n = n.replace(/^수도권 ?전철\s*/g, "").replace(/^서울 ?(지하철|경전철)\s*/g, "").replace(/^인천국제공항철도\s*/g, "공항철도 ").trim();
-	  if (/월미바다열차|월미궤도선/.test(n)) return "";
-      if (/^신분당선/.test(n)) return "신분당선";
-      if (/^1호선/.test(n) || /\b1\s*호선\b/.test(n)) return "1호선";
+      
+      // [필터링] KTX, SRT, 일반 열차 등은 지도에 안 그리기 위해 빈 값 리턴
+      if (/KTX|SRT|새마을|무궁화|누리로|ITX|청춘|가라판|화물|바다열차/.test(n)) return "";
+if (/GTX\s*-?\s*A/i.test(n) || /광역급행철도\s*A/i.test(n) || n === "A노선" || n.includes("GTX A")) {
+    return "GTX-A";
+  }   if (/^신분당선/.test(n)) return "신분당선";
+      if (/^1호선/.test(n) || /\b1\s*호선\b/.test(n) || /^(경인선|경원선|장항선)/.test(n)) return "1호선";
       if (/^2호선/.test(n) || /\b2\s*호선\b/.test(n)) return "2호선";
+      // [핵심] 일산선 잡아서 3호선으로 편입
+      if (/^3호선/.test(n) || /\b3\s*호선\b/.test(n) || /일산선/.test(n)) return "3호선"; 
+      if (/^4호선/.test(n) || /\b4\s*호선\b/.test(n) || /^(과천선|안산선)/.test(n)) return "4호선";
+      if (/^5호선/.test(n) || /\b5\s*호선\b/.test(n)) return "5호선";
+      if (/^6호선/.test(n) || /\b6\s*호선\b/.test(n)) return "6호선";
+      if (/^7호선/.test(n) || /\b7\s*호선\b/.test(n)) return "7호선";
+      if (/^8호선/.test(n) || /\b8\s*호선\b/.test(n)) return "8호선";
       if (/^9호선/.test(n) || /\b9\s*호선\b/.test(n)) return "9호선";
-      if (/^(수인.?분당선|분당선)$/.test(n)) return "수인·분당선";
-      if (/(경의.?중앙선)/.test(n)) return "경의·중앙선";
+
+      if (/^(수인.?분당선|분당선|수인선)$/.test(n)) return "수인·분당선";
+      if (/(경의.?중앙선|경의선|중앙선)/.test(n)) return "경의·중앙선";
       if (/인천국제공항|AREX|공항철도/i.test(n)) return "공항철도";
-      if (/인천.?1호선/.test(n)) return "인천1호선";
-      if (/인천.?2호선/.test(n)) return "인천2호선";
-      if (/신림선/.test(n)) return "신림선";
-      return n;
+      if (/경춘선/.test(n)) return "경춘선";
+      if (/경강선/.test(n)) return "경강선";
+      if (/서해선/.test(n)) return "서해선";
+      if (/김포골드/.test(n)) return "김포골드라인";
+      if (/의정부/.test(n)) return "의정부경전철";
+      if (/용인|에버라인/.test(n)) return "용인경전철";
+      if (/우이신설/.test(n)) return "우이신설선";
+      if (/신림/.test(n)) return "신림선";
+      if (/인천.?1호선|인천 도시철도 1호선/.test(n)) return "인천1호선";
+      if (/인천.?2호선|인천 도시철도 2호선/.test(n)) return "인천2호선";
+// GTX-A 인식 로직 강화
+  if (/GTX\s*-?\s*A/i.test(n) || /수도권\s?광역급행철도\s?A/i.test(n)) return "GTX-A";
+  // 위 목록에 없으면(예: KTX 노선명 등) 그리지 않음
+      return "";
     }
     function normStationKey(s=""){
       return s.trim().normalize('NFKC').replace(/[\(\)\[\]{}]/g,'').replace(/\s+/g,'').replace(/[·\.‧∙・․]/g,'·').replace(/역$/,'').toLowerCase();
     }
-    async function fetchOverpass(query){
-      const res = await fetch('https://overpass-api.de/api/interpreter', { method:'POST', body: query });
-      if(!res.ok) throw new Error('Overpass 오류: ' + res.status);
-      return res.json();
-    }
+async function fetchOverpass(overpassQuery) {
+  const url = "https://overpass-api.de/api/interpreter";
+
+  let res, text;
+  try {
+    res = await fetch(url, { method: "POST", body: overpassQuery });
+    text = await res.text();
+  } catch (err) {
+    console.error("Overpass fetch failed:", err);
+    throw err;
+  }
+
+  console.log("OVERPASS status:", res.status);
+  console.log("OVERPASS head:", text.slice(0, 600));
+
+  if (!res.ok) {
+    throw new Error(`Overpass HTTP ${res.status}`);
+  }
+
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    throw new Error("Overpass returned non-JSON (query parse error / HTML error). See console OVERPASS head.");
+  }
+
+  if (!data || !Array.isArray(data.elements)) {
+    throw new Error("Overpass JSON missing 'elements'. See console.");
+  }
+
+  return data;
+}
+
       const wayMap = new Map();
 	
-	function parseData(data) {
-	  const wayMap = new Map();
-	  const lineMap = new Map();
-	  const rawStations = [];
+function injectLineFromRelation(elements, relationIds, forcedName, forcedColor, linesArray) {
+  const waysById = new Map();
+  for (const el of elements) {
+    if (el.type === "way" && Array.isArray(el.geometry) && el.geometry.length >= 2) {
+      waysById.set(el.id, el.geometry.map(p => [p.lat, p.lon]));
+    }
+  }
 
-	  // 1. 길(Way)의 좌표 데이터를 먼저 싹 긁어모읍니다.
-	  (data.elements || []).forEach(el => {
-		if (el.type === 'way' && el.geometry) {
-		  wayMap.set(el.id, el.geometry.map(p => [p.lat, p.lon]));
-		}
-	  });
+  const relSet = new Set(relationIds);
 
-	  // 2. 노선(Relation)과 역(Node) 정보를 정리합니다.
-	  (data.elements || []).forEach(el => {
-		const t = el.tags || {};
-		
-		// 노선 정리
-		if (el.type === 'relation' && t.route) {
-		  const raw = t['name:ko'] || t.name || t.ref || '';
-		  const name = toCanonicalLine(raw);
-		  if (!name) return;
+  const segs = [];
+  for (const el of elements) {
+    if (el.type === "relation" && relSet.has(el.id) && Array.isArray(el.members)) {
+      for (const m of el.members) {
+        if (m.type === "way") {
+          const g = waysById.get(m.ref);
+          if (g && g.length >= 2) segs.push(g);
+        }
+      }
+    }
+  }
 
-		  const color = colorMap[name] || t.colour || t.color || "#003DA5";
-		  if (!lineMap.has(name)) lineMap.set(name, { name, color, segs: [] });
+  if (segs.length === 0) return false;
+  linesArray.push({ name: forcedName, color: forcedColor, segs });
+  return true;
+}
 
-		  if (Array.isArray(el.members)) {
-			el.members.forEach(m => {
-			  // 여기서 중요함더! wayMap에 좌표가 있으면 segs에 넣습니다.
-			  if (m.type === 'way' && wayMap.has(m.ref)) {
-				lineMap.get(name).segs.push(wayMap.get(m.ref));
-			  }
-			});
-		  }
-		}
-		
-		// 역 정리
-		if (el.type === 'node' && t.railway === 'station') {
-		  const n = t['name:ko'] || t.name || '';
-		  if (n && n !== '원릉') rawStations.push({ name: n, key: normStationKey(n), lat: el.lat, lon: el.lon });
-		}
-	  });
+function parseData(data) {
+  const elements = data.elements || [];
 
-	  const linesArray = Array.from(lineMap.values());
-	  const seen = new Set(), dedup = [];
+  const wayMap = new Map();
+  const lineMap = new Map();
+  const rawStations = [];
+  const usedWayIds = new Set();
 
-	  // 3. 역 필터링 (노선 근처 1km 이내만 살리기)
-	  rawStations.forEach(s => {
-		if (!seen.has(s.key)) {
-		  let minD2 = Infinity;
-		  // 노선이 있어야 거리를 잽니다.
-		  if (linesArray.length > 0) {
-			for (const Ln of linesArray) {
-			  for (const seg of Ln.segs) {
-				for (const p of seg) {
-				  const d2 = (s.lat - p[0]) ** 2 + (s.lon - p[1]) ** 2;
-				  if (d2 < minD2) minD2 = d2;
-				}
-			  }
-			}
-		  }
+  // 1) 선로 좌표 수집
+  for (const el of elements) {
+    if (el.type === "way" && Array.isArray(el.geometry)) {
+      wayMap.set(el.id, el.geometry.map(p => [p.lat, p.lon]));
+    }
+  }
 
-		  // 거리 기준 $d^2 < 0.0001$ (신망리역은 걸러지고 평택은 삽니다)
-		  // 노선 정보가 아예 없는 예외 상황이면 일단 다 보여줍니다.
-		  if (linesArray.length === 0 || minD2 < 0.0005) {
-			seen.add(s.key);
-			dedup.push(s);
-		  }
-		}
-	  });
+  // 2) 노선(Relation) 처리
+  for (const el of elements) {
+    const t = el.tags || {};
+    const r = (t.route || "");
 
-	  return { lines: linesArray, stations: dedup };
-	}
+    if (el.type === "relation" && t.type === "route" &&
+        /^(subway|metro|light_rail|tram|monorail|train|railway)$/.test(r)) {
+
+      const raw = t["name:ko"] || t.name || t.ref || "";
+      const name = toCanonicalLine(raw);
+      if (!name) continue;
+
+      const color = colorMap[name] || t.colour || t.color || "#003DA5";
+      if (!lineMap.has(name)) lineMap.set(name, { name, color, segs: [] });
+
+      if (Array.isArray(el.members)) {
+        for (const m of el.members) {
+          if (m.type === "way" && wayMap.has(m.ref)) {
+            lineMap.get(name).segs.push(wayMap.get(m.ref));
+            usedWayIds.add(m.ref);
+          }
+        }
+      }
+    }
+
+    // 2-1) 역 정보 수집 (node)
+    if (el.type === "node" && (t.railway === "station" || t.public_transport === "station")) {
+      const n = t["name:ko"] || t.name || "";
+      if (n && n !== "원릉") rawStations.push({ name: n, key: normStationKey(n), lat: el.lat, lon: el.lon });
+    }
+
+    // 2-2) 역 정보 수집 (way: station, out center 필요)
+    if (el.type === "way" && t.railway === "station" && el.center) {
+      const n = t["name:ko"] || t.name || "";
+      if (n && n !== "원릉") rawStations.push({ name: n, key: normStationKey(n), lat: el.center.lat, lon: el.center.lon });
+    }
+
+    // 2-3) 역 정보 수집 (relation: stop_area/station, out center 필요)
+if (el.type === "relation" && t.public_transport === "stop_area" && el.center) {
+  const n = t["name:ko"] || t.name || "";
+  if (n && n !== "원릉") stopAreas.push({ name: n, key: normStationKey(n), lat: el.center.lat, lon: el.center.lon });
+}
+
+  }
+
+  // 3) 왕따 선로 구제
+  for (const el of elements) {
+    if (el.type === "way" && wayMap.has(el.id) && !usedWayIds.has(el.id)) {
+      const t = el.tags || {};
+      const isRailway = /^(subway|light_rail|metro|monorail|rail|train)$/.test(t.railway || "");
+      if (!isRailway) continue;
+
+      const raw = t["name:ko"] || t.name || t.ref || "";
+      const name = toCanonicalLine(raw);
+      if (name && lineMap.has(name)) {
+        lineMap.get(name).segs.push(wayMap.get(el.id));
+        usedWayIds.add(el.id);
+      }
+    }
+  }
+
+  const linesArray = Array.from(lineMap.values());
+
+  // 3.5) GTX-A 강제 주입 (relation id)
+  injectLineFromRelation(elements, [17413295], "GTX-A", (colorMap["GTX-A"] || "#8B1C62"), linesArray);
+
+  // 4) 역 필터링 + 중복 제거
+  const seen = new Set();
+  const dedup = [];
+
+  for (const s of rawStations) {
+    const uniq = `${s.key}@${s.lat.toFixed(5)},${s.lon.toFixed(5)}`;
+    if (seen.has(uniq)) continue;
+
+    let minD2 = Infinity;
+    if (linesArray.length > 0) {
+      for (const Ln of linesArray) {
+        for (const seg of Ln.segs) {
+          for (const p of seg) {
+            const d2 = (s.lat - p[0]) ** 2 + (s.lon - p[1]) ** 2;
+            if (d2 < minD2) minD2 = d2;
+          }
+        }
+      }
+    }
+
+    if (linesArray.length === 0 || minD2 < 0.0005) {
+      seen.add(uniq);
+      dedup.push(s);
+    }
+  }
+
+  // 5) 수동 역 추가 (seen 키 규칙 동일하게)
+  const manualStations = [
+    { key: normStationKey("초월"), name: "초월", line: "경강선", lat: 37.3736, lon: 127.2995 },
+    { key: normStationKey("임학"), name: "임학", line: "인천1호선", lat: 37.5455, lon: 126.7389 },
+    { key: normStationKey("박촌"), name: "박촌", line: "인천1호선", lat: 37.5536, lon: 126.7450 },
+  ];
+
+  for (const m of manualStations) {
+const uniq = m.key;
+    if (!seen.has(uniq)) {
+      seen.add(uniq);
+      dedup.push(m);
+    }
+  }
+
+  return { lines: linesArray, stations: dedup };
+}
+
+
     function sortLineEntries(entries){
       function keyFor(name){const m=name.match(/^(\d+)호선$/);if(m)return{type:'num',val:parseInt(m[1],10)};return{type:'txt',val:name};}
       return entries.sort(([aName],[bName])=>{const A=keyFor(aName),B=keyFor(bName);if(A.type!==B.type)return A.type==='num'?-1:1;if(A.type==='num')return A.val-B.val;return aName.localeCompare(bName,'ko');});
@@ -319,6 +491,11 @@
         Ln.segs.forEach(seg=>{if(Array.isArray(seg)&&seg.length)L.polyline(seg,{color:Ln.color,weight:6,opacity:0.95,lineCap:'round'}).addTo(map);});
       });
     }
+	const STATION_LINE_OVERRIDE = new Map([
+  ["천호", { primary: "8호선", also: ["5호선"] }],
+  ["강동구청", { primary: "8호선" }],
+  // 필요하면 계속 추가
+]);
 	function nearestLine(lat, lon) {
 		let best = { d2: Infinity, color: '#003DA5', name: null };
 		  
@@ -336,6 +513,11 @@
 			}
 		  }
 		  return best;
+}
+function nearestLineForStation(station){
+  const ov = STATION_LINE_OVERRIDE.get(station.key);
+  if (ov?.primary) return ov.primary; // 문자열로 반환
+  return nearestLine(station.lat, station.lon).name; // 기존 거리 기반
 }
 	function computeTotals(){
 	  // 모든 노선의 total 초기화
@@ -395,7 +577,16 @@
         });
         return Array.from(nearbyLines);
     }
+function nearbyLinesForStation(station){
+  const ov = STATION_LINE_OVERRIDE.get(station.key);
+  if (!ov) return getNearbyLines(station.lat, station.lon);
 
+  // primary는 무조건 포함, also는 추가
+  const base = new Set(getNearbyLines(station.lat, station.lon));
+  base.add(ov.primary);
+  (ov.also || []).forEach(x => base.add(x));
+  return [...base];
+}
     /* ------------------------------------------------ */
     /* 모바일 환경: 대시보드 업데이트 함수 (새로운 로직) */
     /* ------------------------------------------------ */
@@ -457,9 +648,12 @@
 
     async function init(){
       try{
-        const raw=await fetchOverpass(overpassQuery);
-		console.log("Raw Data:", raw); // 데이터 들어오는지 확인용
+const raw = await fetchOverpass(overpassQuery);
+console.log("elements:", raw.elements.length);
+
         subwayData=parseData(raw);
+		window.subwayData = subwayData;
+		window.rawOverpass = raw;
 		console.log("Parsed Data:", subwayData); // 파싱 잘 됐나 확인용
 		if (subwayData.lines.length === 0) {
        console.warn("노선 데이터가 없심더! BBox나 쿼리를 확인해보이소.");
@@ -483,35 +677,65 @@
       if(e.key==='Enter'){
         const key=normStationKey(inputElement.value.replace(/\./g,'·'));
         if(!key)return;
-        const found=subwayData.stations.find(s=>s.key===key);
-        if(!found){alert('정확히 일치하는 역명을 찾을 수 없습니다.');return;}
-        
-        if(!shownStations.has(key)){
-          const nearest=nearestLine(found.lat,found.lon);
-		  const connectingLines = getNearbyLines(found.lat, found.lon);
-		  const icon=L.divIcon({
-              className:'',
-              html:`<div class='station-icon' style='background-color:${nearest.color}; border: 2px solid #fff; width:14px; height:14px;'></div>`,
-              iconSize:[14,14],
-              iconAnchor:[7,7]
-          });    
-		  const m=L.marker([found.lat,found.lon],{icon, zIndexOffset: 1000 }).addTo(map);
-          L.tooltip({permanent:true,direction:'top',className:'label-text'}).setLatLng([found.lat,found.lon]).setContent(found.name).addTo(map);
-          shownStations.set(key,m);
+const foundList = subwayData.stations.filter(s => s.key === key);
+if (foundList.length === 0) {
+  alert('정확히 일치하는 역명을 찾을 수 없습니다.');
+  return;
+}
 
-		  connectingLines.forEach(name => {
-              if(name) {
-                  lineStats[name] = lineStats[name] || {total:0, matched:0, color: colorMap[name] || '#003DA5'};
-                  lineStats[name].matched += 1;
-              }
-          });
-          // **********************************
+const center = map.getCenter();
 
-          updateUI();
+const targets = foundList
+  .filter(s => typeof s.lat !== 'undefined' && s.lat !== null)
+  .map(s => ({ s, d2: (s.lat - center.lat)**2 + (s.lon - center.lng)**2 }))
+  .sort((a, b) => a.d2 - b.d2)
+  .map(x => x.s);
+
+if (targets.length === 0) return;
+
+for (const st of targets) {
+  const stationId = `${st.lat.toFixed(5)}-${st.lon.toFixed(5)}`;
+
+  if (!shownStations.has(stationId)) {
+    const nearest = nearestLine(st.lat, st.lon);
+    const connectingLines = getNearbyLines(st.lat, st.lon);
+
+    const icon = L.divIcon({
+      className: '',
+      html: `<div class='station-icon' style='background-color:${nearest.color}; border: 2px solid #fff; width:14px; height:14px;'></div>`,
+      iconSize: [14, 14],
+      iconAnchor: [7, 7]
+    });
+
+    const m = L.marker([st.lat, st.lon], { icon, zIndexOffset: 1000 }).addTo(map);
+    L.tooltip({ permanent: true, direction: 'top', className: 'label-text' })
+      .setLatLng([st.lat, st.lon])
+      .setContent(st.name)
+      .addTo(map);
+
+    shownStations.set(stationId, m);
+
+    connectingLines.forEach(name => {
+      if (name) {
+        lineStats[name] = lineStats[name] || { total: 0, matched: 0, color: colorMap[name] || '#003DA5' };
+        lineStats[name].matched += 1;
+      }
+    });
+  }
+}
+
+updateUI();
+
+inputElement.value = '';
+map.panTo([targets[0].lat, targets[0].lon]);
+
+// 이동은 “가장 가까운 것”으로만
+const first = targets[0];
+inputElement.value = '';
+map.panTo([first.lat, first.lon]);
         }
         inputElement.value='';map.panTo([found.lat,found.lon]);
-      }
-    };
+      };
 
     if (inputPC) inputPC.addEventListener('keypress', e => searchHandler(e, inputPC));
     if (inputMobile) inputMobile.addEventListener('keypress', e => searchHandler(e, inputMobile));
