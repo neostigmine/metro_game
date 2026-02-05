@@ -224,6 +224,11 @@ out geom;`
 function toCanonicalLine(raw=""){
       let n = (raw||"").toString().normalize("NFKC");
       // 잡다한 수식어 제거
+	    const orig = n; // 셔틀 제거 전 원문 보관
+	    if (/(인천국제공항|incheon\s*international\s*airport)/i.test(orig) &&
+      /(오렌지\s*셔틀|orange\s*shuttle|셔틀트레인|셔틀\s*트레인|셔틀|shuttle)/i.test(orig)) {
+    return ""; // 지도에서 아예 빼기 (원하면 다른 노선명으로 return 해도 됨)
+  }
       n = n.replace(/:.*/g, "").replace(/\(.*?\)/g, "").replace(/내선|외선|상행|하행|상선|하선|inbound|outbound/gi, "").replace(/[·\.‧∙・․]/g, "·").replace(/\s+/g, " ").trim();
       n = n.replace(/(성수\s*지선|신설\s*지선|지선)/g, "").replace(/(급행|익스프레스|express)/ig, "").replace(/(셔틀|셔틀트레인|shuttle)/ig, "").replace(/(직통|직통열차|direct)/ig, "").replace(/계통/g, "").replace(/\s+/g, " ").trim();
       n = n.replace(/^수도권 ?전철\s*/g, "").replace(/^서울 ?(지하철|경전철)\s*/g, "").replace(/^인천국제공항철도\s*/g, "공항철도 ").trim();
@@ -396,11 +401,15 @@ for (const el of elements) {
     return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
   }
   // 1) 선로 좌표 수집
-  for (const el of elements) {
-    if (el.type === "way" && Array.isArray(el.geometry)) {
-      wayMap.set(el.id, el.geometry.map(p => [p.lat, p.lon]));
-    }
+const wayInfoMap = new Map(); // id -> { seg, tags }
+
+for (const el of elements) {
+  if (el.type === "way" && Array.isArray(el.geometry)) {
+    const seg = el.geometry.map(p => [p.lat, p.lon]);
+    wayMap.set(el.id, seg);
+    wayInfoMap.set(el.id, { seg, tags: el.tags || {} });
   }
+}
 
   // 2) 노선(Relation) 처리
   const lineStops = new Map(); // lineName -> Set(stationKey)
@@ -422,11 +431,17 @@ for (const el of elements) {
 if (Array.isArray(el.members)) {
   for (const m of el.members) {
     // 선로
-    if (m.type === "way" && wayMap.has(m.ref)) {
-      lineMap.get(name).segs.push(wayMap.get(m.ref));
-      usedWayIds.add(m.ref);
-      continue;
-    }
+if (m.type === "way" && wayInfoMap.has(m.ref)) {
+  const info = wayInfoMap.get(m.ref);
+  const svc = (info.tags.service || "").toLowerCase();
+
+  // ✅ 차량기지/측선/유치선/분기선 등은 노선도에서 제외
+  if (/(yard|siding|spur|stabling|crossover)/.test(svc)) continue;
+
+  lineMap.get(name).segs.push(info.seg);
+  usedWayIds.add(m.ref);
+  continue;
+}
 
     // ✅ 정차역(stop/platform 등) 수집: 이름 없으면 좌표로 저장
     const role = (m.role || "").toLowerCase();
@@ -505,6 +520,8 @@ if (el.type === "relation" && t.public_transport === "stop_area" && el.center) {
         lineMap.get(name).segs.push(wayMap.get(el.id));
         usedWayIds.add(el.id);
       }
+	  const svc = (t.service || "").toLowerCase();
+if (/(yard|siding|spur|stabling|crossover)/.test(svc)) continue;
     }
   }
 
@@ -597,18 +614,41 @@ for (const [key, arr] of groups.entries()) {
 }
 
 function mergeManualStations(base, manual) {
-  const mp = new Map(base.map(s => [s.key, s]));
+  const out = base.slice();         // ✅ base는 전부 유지
+  const TH_M = 300;                 // manual 좌표와 300m 이내면 "그 역"으로 간주(필요시 조절)
+
   for (const m of (manual || [])) {
-    mp.set(m.key, { ...(mp.get(m.key) || {}), ...m, _manual: true });
+    let bestIdx = -1;
+    let bestD = Infinity;
+
+    for (let i = 0; i < out.length; i++) {
+      const s = out[i];
+      if (s.key !== m.key) continue;              // 같은 '역명 key' 후보만 비교
+      const d = haversineMeters(s.lat, s.lon, m.lat, m.lon);
+      if (d < bestD) { bestD = d; bestIdx = i; }
+    }
+
+    if (bestIdx >= 0 && bestD <= TH_M) {
+      // ✅ 가장 가까운 1개만 manual로 보정(덮어쓰기)
+      out[bestIdx] = { ...out[bestIdx], ...m, _manual: true };
+    } else {
+      // ✅ 근처에 같은 이름 역이 없으면 새로 추가
+      out.push({ ...m, _manual: true });
+    }
   }
-  return Array.from(mp.values());
+
+  return out;
 }
+
 
 const manualStations = [
   { key: normStationKey("초월"), name: "초월", line: "경강선", lat: 37.3736, lon: 127.2995 },
   { key: normStationKey("임학"), name: "임학", line: "인천1호선", lat: 37.5455, lon: 126.7389 },
   { key: normStationKey("박촌"), name: "박촌", line: "인천1호선", lat: 37.5536, lon: 126.7450 },
-   { key: normStationKey("박촌"), name: "박촌", line: "인천1호선", lat: 37.5536, lon: 126.7450 },
+  { key: normStationKey("박촌"), name: "박촌", line: "인천1호선", lat: 37.5536, lon: 126.7450 },
+  { key: normStationKey("양평"), name: "양평", line: "경의·중앙선", lat: 37.4928, lon: 127.4918 },
+  { key: normStationKey("신촌"), name: "신촌", line: "경의·중앙선", lat: 37.5597, lon: 126.9423 },
+  { key: normStationKey("부천시청"), name: "부천시청", line: "7호선", lat: 37.5046, lon: 126.7639 },
 
 ];
 
@@ -900,7 +940,7 @@ console.log("elements:", raw.elements.length);
 subwayData = window.subwayData = parseData(raw);
 
 // ✅ 삭제할 역 이름은 '배열'로 따로 둔다
-const EXCLUDED_NAMES = ["월미공원", "월미문화의거리", "월미바다", "박물관", "탑승동", "제1터미널", "제2터미널", "천안아산역"]; 
+const EXCLUDED_NAMES = ["월미공원", "월미문화의거리", "월미바다", "박물관", "탑승동", "제1터미널", "제2터미널", "천안아산역", "양평레일바이크종점", "총신대입구(이수)"]; 
 const excludeKeys = new Set(EXCLUDED_NAMES.map(normStationKey));
 
 // 1) stations(검색/결과)에서 제거
@@ -940,6 +980,53 @@ catch(e){alert('초기화 오류: '+e.message);console.error(e);} }
     // ********* 검색 입력 처리 로직 수정 *********
     const inputPC = document.getElementById('stationSearchPC');
     const inputMobile = document.getElementById('stationSearchMobile');
+function pickClosestLineNameForStation(st, lineNames) {
+  const data = window.subwayData;
+  if (!data || !Array.isArray(data.lines) || !lineNames || lineNames.length === 0) return null;
+
+  let bestName = null;
+  let bestD2 = Infinity;
+
+  for (const name of lineNames) {
+    const Ln = data.lines.find(L => L.name === name);
+    if (!Ln) continue;
+
+    for (const seg of (Ln.segs || [])) {
+      if (!Array.isArray(seg)) continue;
+      for (const p of seg) {
+        const d2 = (st.lat - p[0]) ** 2 + (st.lon - p[1]) ** 2;
+        if (d2 < bestD2) {
+          bestD2 = d2;
+          bestName = name;
+        }
+      }
+    }
+  }
+  return bestName;
+}
+
+function linesForStationResolved(st) {
+  // 1) key기반(충돌 가능)
+  const byKey = linesForStationKey(st.key);
+
+  // 2) 좌표 기반(충돌에 강함)
+  const byGeo = nearbyLinesForStation(st);
+
+  // 둘 다 있으면 교집합 우선(동명이역 분리)
+  if (byKey.length && byGeo.length) {
+    const setGeo = new Set(byGeo);
+    const inter = byKey.filter(x => setGeo.has(x));
+    if (inter.length) return inter;
+  }
+
+  // 하나만 있으면 그걸 사용
+  if (byGeo.length) return byGeo;
+  if (byKey.length) return byKey;
+
+  // 최후 수단
+  const one = nearestLineForStation(st);
+  return one ? [one] : [];
+}
 
 const searchHandler = (e, inputElement) => {
   if (e.key !== 'Enter') return;
@@ -971,21 +1058,27 @@ const searchHandler = (e, inputElement) => {
   if (targets.length === 0) return;
 
   for (const st of targets) {
-    const stationId = st.key;
-    if (shownStations.has(stationId)) continue;
+const stationId = `${st.key}@${st.lat.toFixed(6)},${st.lon.toFixed(6)}`;
+if (shownStations.has(stationId)) continue;	
 
-	let connectingLines = linesForStationKey(st.key);
-    const nearest =
-      connectingLines.length > 0
-        ? (data.lines.find(L => L.name === connectingLines[0]) || nearestLine(st.lat, st.lon))
-        : nearestLine(st.lat, st.lon);
+	let connectingLines = linesForStationResolved(st);
 
-    const icon = L.divIcon({
-      className: '',
-      html: `<div class='station-icon' style='background-color:${nearest.color}; border: 2px solid #fff; width:14px; height:14px;'></div>`,
-      iconSize: [14, 14],
-      iconAnchor: [7, 7]
-    });
+// primary(색상용) 라인은 “후보 중 실제로 가장 가까운 노선”
+const primaryName = pickClosestLineNameForStation(st, connectingLines);
+
+// primary 라인 색을 우선 사용, 없으면 기존 nearestLine
+const primaryObj = primaryName ? data.lines.find(L => L.name === primaryName) : null;
+const fallbackNearest = nearestLine(st.lat, st.lon);
+const markerColor = primaryObj?.color || colorMap[primaryName] || fallbackNearest.color;
+
+// 아이콘에 markerColor 적용
+const icon = L.divIcon({
+  className: '',
+  html: `<div class='station-icon' style='background-color:${markerColor}; border: 2px solid #fff; width:14px; height:14px;'></div>`,
+  iconSize: [14, 14],
+  iconAnchor: [7, 7]
+});
+
 
     const marker = L.marker([st.lat, st.lon], { icon, zIndexOffset: 1000 }).addTo(map);
     L.tooltip({ permanent: true, direction: 'top', className: 'label-text' })
