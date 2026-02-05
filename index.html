@@ -180,21 +180,16 @@
 	const bbox = [36.7, 126.4, 38.3, 127.9];
 const overpassQuery = `[out:json][timeout:300];
 (
-  relation["type"="route"]["route"~"^(subway|metro|light_rail|tram|monorail|train|railway)$"]
-    (${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]})
+	relation["type"="route"]["route"~"^(subway|metro|light_rail|tram|monorail|train|railway|maglev)$"](${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]})
     ->.routes;
-
-
-relation(17413295)->.gtxa;
-(.gtxa; >>;);
 
   way(r.routes);
 
 
-  way["railway"~"^(subway|light_rail|monorail|tram|metro)$"]
+  way["railway"~"^(subway|light_rail|monorail|tram|metro|maglev)$"]
     (${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
 
-  way["railway"~"^(subway|light_rail|monorail|tram|metro|rail)$"]
+  way["railway"~"^(subway|light_rail|monorail|tram|metro|rail|maglev)$"]
     ["service"~"^(subway|metro|urban|commuter|high_speed)$"]
     (${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
 
@@ -209,9 +204,10 @@ relation(17413295)->.gtxa;
 relation["public_transport"="stop_area"]["amenity"!="bus_station"](${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
 relation["public_transport"="station"]["amenity"!="bus_station"](${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
 
+  relation(17413295) ->.gtxa;
+  .gtxa;
 );
 out body;
->;
 out geom;`
 
 
@@ -222,7 +218,7 @@ out geom;`
       "수인·분당선": "#E0A134","경의·중앙선": "#2ABFD0","공항철도": "#006D9D","신분당선": "#BB1834",
       "경강선": "#003DA5","경춘선": "#0C8E72","서해선": "#81A914",
       "김포골드라인": "#A17800","의정부경전철": "#FDA600","용인경전철": "#509F22","우이신설선": "#B0CE18",
-      "신림선": "#6789CA","인천1호선": "#6E98BB","인천2호선": "#ED8B00", "GTX-A":"#9A6292",
+      "신림선": "#6789CA","인천1호선": "#6E98BB","인천2호선": "#ED8B00", "GTX-A":"#9A6292", "인천공항자기부상열차": "#FFD400",
     };
 	
 function toCanonicalLine(raw=""){
@@ -254,7 +250,7 @@ if (/GTX\s*-?\s*A/i.test(n) || /광역급행철도\s*A/i.test(n) || n === "A노�
       if (/경춘선/.test(n)) return "경춘선";
       if (/경강선/.test(n)) return "경강선";
       if (/서해선/.test(n)) return "서해선";
-      if (/김포골드/.test(n)) return "김포골드라인";
+      if (/김포/.test(n)) return "김포골드라인";
       if (/의정부/.test(n)) return "의정부경전철";
       if (/용인|에버라인/.test(n)) return "용인경전철";
       if (/우이신설/.test(n)) return "우이신설선";
@@ -264,6 +260,9 @@ if (/GTX\s*-?\s*A/i.test(n) || /광역급행철도\s*A/i.test(n) || n === "A노�
 // GTX-A 인식 로직 강화
   if (/GTX\s*-?\s*A/i.test(n) || /수도권\s?광역급행철도\s?A/i.test(n)) return "GTX-A";
   // 위 목록에 없으면(예: KTX 노선명 등) 그리지 않음
+    if (/(인천\s*공항\s*자기\s*부상|인천공항\s*자기부상|인천공항\s*자기부상철도|Incheon\s*Airport\s*Maglev|Incheon\s*Maglev)/i.test(n))
+    return "인천공항자기부상열차";
+
       return "";
     }
     function normStationKey(s=""){
@@ -298,7 +297,7 @@ async function fetchOverpass(overpassQuery) {
   if (!data || !Array.isArray(data.elements)) {
     throw new Error("Overpass JSON missing 'elements'. See console.");
   }
-
+  window.rawOverpass = data; 
   return data;
 }
 
@@ -330,15 +329,72 @@ function injectLineFromRelation(elements, relationIds, forcedName, forcedColor, 
   linesArray.push({ name: forcedName, color: forcedColor, segs });
   return true;
 }
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = x => x * Math.PI / 180;
+  const a1 = toRad(lat1), o1 = toRad(lon1);
+  const a2 = toRad(lat2), o2 = toRad(lon2);
+  const da = a2 - a1, doo = o2 - o1;
+  const h =
+    Math.sin(da/2)**2 +
+    Math.cos(a1)*Math.cos(a2)*Math.sin(doo/2)**2;
+  return 2*R*Math.asin(Math.min(1, Math.sqrt(h)));
+}
+function addStopPointsByNearestStation(lineStops, lineStopPoints, stations) {
+  for (const [lineName, pts] of lineStopPoints.entries()) {
+    if (!lineStops.has(lineName)) lineStops.set(lineName, new Set());
+    const set = lineStops.get(lineName);
 
+    // 공항/대형역은 stop_position ↔ station node가 멀 수 있어 threshold를 좀 크게
+    const maxD = (lineName === "공항철도") ? 2000 : 1200;
+
+    for (const [lat, lon] of pts) {
+      let bestKey = null, bestD = Infinity;
+      for (const st of stations) {
+        const d = haversineMeters(lat, lon, st.lat, st.lon);
+        if (d < bestD) { bestD = d; bestKey = st.key; }
+      }
+      if (bestKey && bestD <= maxD) set.add(bestKey);
+    }
+  }
+}
+
+
+
+function addManualLineStops(lineStops, lineName, stationNames) {
+  if (!lineStops.has(lineName)) lineStops.set(lineName, new Set());
+  const set = lineStops.get(lineName);
+
+  for (const nm of stationNames) {
+    set.add(normStationKey(nm));
+  }
+}
 function parseData(data) {
   const elements = data.elements || [];
 
   const wayMap = new Map();
   const lineMap = new Map();
   const rawStations = [];
-  const usedWayIds = new Set();
+  const nodeMap = new Map();
+const relMap = new Map();
+for (const el of elements) {
+  if (el.type === "node") nodeMap.set(el.id, el);
+  else if (el.type === "relation") relMap.set(el.id, el);
+}
 
+  const usedWayIds = new Set();
+  function distMeters(a, b) {
+    const R = 6371000;
+    const toRad = x => x * Math.PI / 180;
+    const lat1 = toRad(a.lat), lon1 = toRad(a.lon);
+    const lat2 = toRad(b.lat), lon2 = toRad(b.lon);
+    const dlat = lat2 - lat1;
+    const dlon = lon2 - lon1;
+    const h =
+      Math.sin(dlat / 2) ** 2 +
+      Math.cos(lat1) * Math.cos(lat2) * Math.sin(dlon / 2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
   // 1) 선로 좌표 수집
   for (const el of elements) {
     if (el.type === "way" && Array.isArray(el.geometry)) {
@@ -347,12 +403,14 @@ function parseData(data) {
   }
 
   // 2) 노선(Relation) 처리
+  const lineStops = new Map(); // lineName -> Set(stationKey)
+  const lineStopPoints = new Map(); // lineName -> Array<[lat, lon]> (이름 없는 stop_position 등)
   for (const el of elements) {
     const t = el.tags || {};
     const r = (t.route || "");
 
     if (el.type === "relation" && t.type === "route" &&
-        /^(subway|metro|light_rail|tram|monorail|train|railway)$/.test(r)) {
+        /^(subway|metro|light_rail|tram|monorail|train|railway|maglev)$/.test(r)) {
 
       const raw = t["name:ko"] || t.name || t.ref || "";
       const name = toCanonicalLine(raw);
@@ -361,14 +419,55 @@ function parseData(data) {
       const color = colorMap[name] || t.colour || t.color || "#003DA5";
       if (!lineMap.has(name)) lineMap.set(name, { name, color, segs: [] });
 
-      if (Array.isArray(el.members)) {
-        for (const m of el.members) {
-          if (m.type === "way" && wayMap.has(m.ref)) {
-            lineMap.get(name).segs.push(wayMap.get(m.ref));
-            usedWayIds.add(m.ref);
-          }
-        }
+if (Array.isArray(el.members)) {
+  for (const m of el.members) {
+    // 선로
+    if (m.type === "way" && wayMap.has(m.ref)) {
+      lineMap.get(name).segs.push(wayMap.get(m.ref));
+      usedWayIds.add(m.ref);
+      continue;
+    }
+
+    // ✅ 정차역(stop/platform 등) 수집: 이름 없으면 좌표로 저장
+    const role = (m.role || "").toLowerCase();
+    const isStopLike =
+      role.includes("stop") ||
+      role.includes("platform") ||
+      role.includes("stop_entry_only") ||
+      role.includes("stop_exit_only");
+
+    if (isStopLike && m.type === "node") {
+      const nEl = nodeMap.get(m.ref);
+      if (!nEl) continue;
+      const nt = nEl.tags || {};
+      const n = nt["name:ko"] || nt.name || "";
+
+      if (n) {
+        const key = normStationKey(n);
+        if (!lineStops.has(name)) lineStops.set(name, new Set());
+        lineStops.get(name).add(key);
+      } else {
+        if (!lineStopPoints.has(name)) lineStopPoints.set(name, []);
+        lineStopPoints.get(name).push([nEl.lat, nEl.lon]); // 이름 없는 stop_position 대비
       }
+    }
+
+    // stop_area가 멤버로 들어오는 경우(이름만으로도 key 추가 가능)
+    if (isStopLike && m.type === "relation") {
+      const rEl = relMap.get(m.ref);
+      if (!rEl) continue;
+      const rt = rEl.tags || {};
+      const n = rt["name:ko"] || rt.name || "";
+      if (!n) continue;
+
+      const key = normStationKey(n);
+      if (!lineStops.has(name)) lineStops.set(name, new Set());
+      lineStops.get(name).add(key);
+    }
+  }
+}
+
+
     }
 
     // 2-1) 역 정보 수집 (node)
@@ -386,7 +485,9 @@ function parseData(data) {
     // 2-3) 역 정보 수집 (relation: stop_area/station, out center 필요)
 if (el.type === "relation" && t.public_transport === "stop_area" && el.center) {
   const n = t["name:ko"] || t.name || "";
-  if (n && n !== "원릉") stopAreas.push({ name: n, key: normStationKey(n), lat: el.center.lat, lon: el.center.lon });
+  if (n && n !== "원릉") {
+    rawStations.push({ name: n, key: normStationKey(n), lat: el.center.lat, lon: el.center.lon, _stop_area: true });
+  }
 }
 
   }
@@ -412,79 +513,192 @@ if (el.type === "relation" && t.public_transport === "stop_area" && el.center) {
   // 3.5) GTX-A 강제 주입 (relation id)
   injectLineFromRelation(elements, [17413295], "GTX-A", (colorMap["GTX-A"] || "#8B1C62"), linesArray);
 
-  // 4) 역 필터링 + 중복 제거
-  const seen = new Set();
-  const dedup = [];
 
-  for (const s of rawStations) {
-    const uniq = `${s.key}@${s.lat.toFixed(5)},${s.lon.toFixed(5)}`;
-    if (seen.has(uniq)) continue;
+  // 4) 역 필터링 + 중복 제거 (환승역 병합)
+// ===== 역 병합(클러스터링) =====
 
-    let minD2 = Infinity;
-    if (linesArray.length > 0) {
-      for (const Ln of linesArray) {
-        for (const seg of Ln.segs) {
-          for (const p of seg) {
-            const d2 = (s.lat - p[0]) ** 2 + (s.lon - p[1]) ** 2;
-            if (d2 < minD2) minD2 = d2;
-          }
+
+const THRESH_M = 450; // 필요시 600~800까지 올려보기
+
+// 1) 선로 근처 필터 통과한 후보만 모으기
+// 1) 선로 근처 필터 통과한 후보만 모으기 (안전 버전)
+const candidates = [];
+let sawAnyPointGlobal = false;
+
+for (const s of rawStations) {
+  let minD2 = Infinity;
+  let sawPoint = false;
+
+  if (linesArray.length > 0) {
+    for (const Ln of linesArray) {
+      // ⚠️ 여기서 GTX-A를 빼지 마. parseData는 "전체 역 목록"이 목적이라서 부작용 큼.
+      for (const seg of Ln.segs) {
+        if (!Array.isArray(seg) || seg.length === 0) continue;
+        for (const p of seg) {
+          sawPoint = true;
+          sawAnyPointGlobal = true;
+          const d2 = (s.lat - p[0]) ** 2 + (s.lon - p[1]) ** 2;
+          if (d2 < minD2) minD2 = d2;
+        }
+      }
+    }
+  }
+
+  // ✅ 선로 점을 한 번도 못 봤으면 필터 적용하지 않음 (자동역 몰살 방지)
+  if (linesArray.length !== 0 && sawAnyPointGlobal && sawPoint && minD2 >= 0.0005) continue;
+
+  candidates.push({ ...s });
+}
+
+
+// 2) key별로 묶기
+const groups = new Map();
+for (const s of candidates) {
+  const k = s.key;
+  if (!groups.has(k)) groups.set(k, []);
+  groups.get(k).push(s);
+}
+
+// 3) 각 key 그룹에서 거리 기준 클러스터링 → 클러스터마다 1개로 압축
+const dedup = [];
+for (const [key, arr] of groups.entries()) {
+  if (arr.length === 1) {
+    dedup.push(arr[0]);
+    continue;
+  }
+
+  const used = new Array(arr.length).fill(false);
+
+  for (let i = 0; i < arr.length; i++) {
+    if (used[i]) continue;
+    used[i] = true;
+
+    const q = [i];
+    const comp = [arr[i]];
+
+    while (q.length) {
+      const u = q.pop();
+      for (let v = 0; v < arr.length; v++) {
+        if (used[v]) continue;
+        if (distMeters(arr[u], arr[v]) <= THRESH_M) {
+          used[v] = true;
+          q.push(v);
+          comp.push(arr[v]);
         }
       }
     }
 
-    if (linesArray.length === 0 || minD2 < 0.0005) {
-      seen.add(uniq);
-      dedup.push(s);
-    }
+    let lat = 0, lon = 0;
+    for (const s of comp) { lat += s.lat; lon += s.lon; }
+    lat /= comp.length; lon /= comp.length;
+
+    dedup.push({ ...comp[0], key, lat, lon });
   }
+}
 
-  // 5) 수동 역 추가 (seen 키 규칙 동일하게)
-  const manualStations = [
-    { key: normStationKey("초월"), name: "초월", line: "경강선", lat: 37.3736, lon: 127.2995 },
-    { key: normStationKey("임학"), name: "임학", line: "인천1호선", lat: 37.5455, lon: 126.7389 },
-    { key: normStationKey("박촌"), name: "박촌", line: "인천1호선", lat: 37.5536, lon: 126.7450 },
-  ];
-
-  for (const m of manualStations) {
-const uniq = m.key;
-    if (!seen.has(uniq)) {
-      seen.add(uniq);
-      dedup.push(m);
-    }
+function mergeManualStations(base, manual) {
+  const mp = new Map(base.map(s => [s.key, s]));
+  for (const m of (manual || [])) {
+    mp.set(m.key, { ...(mp.get(m.key) || {}), ...m, _manual: true });
   }
+  return Array.from(mp.values());
+}
 
-  return { lines: linesArray, stations: dedup };
+const manualStations = [
+  { key: normStationKey("초월"), name: "초월", line: "경강선", lat: 37.3736, lon: 127.2995 },
+  { key: normStationKey("임학"), name: "임학", line: "인천1호선", lat: 37.5455, lon: 126.7389 },
+  { key: normStationKey("박촌"), name: "박촌", line: "인천1호선", lat: 37.5536, lon: 126.7450 },
+   { key: normStationKey("박촌"), name: "박촌", line: "인천1호선", lat: 37.5536, lon: 126.7450 },
+
+];
+
+const dedup2 = mergeManualStations(dedup, manualStations);
+addStopPointsByNearestStation(lineStops, lineStopPoints, dedup2);
+
+const stationsFinal = mergeManualStations(dedup, manualStations);
+// DEBUG: 같은 역 이름이 여러 개로 남아있는지 체크
+const m = new Map();
+for (const s of dedup2) {
+  const base = (s.key || "").split("#")[0];
+  if (!m.has(base)) m.set(base, []);
+  m.get(base).push(s);
+}
+const dups = [...m.entries()].filter(([k, arr]) => arr.length >= 2);
+console.log("DUP STATIONS:", dups.map(([k, arr]) => ({
+  key: k,
+  n: arr.length,
+  pts: arr.map(x => [x.lat, x.lon])
+})));
+addManualLineStops(lineStops, "GTX-A", [
+  "운정중앙","킨텍스","대곡","연신내","서울","삼성"
+]);
+const lineStopsObj = Object.fromEntries(
+  [...lineStops.entries()].map(([k, v]) => [k, [...v]])
+);
+const EXCLUDED_STATION_NAMES = [
+  // 콘솔에서 복사한 key들 넣기
+  // 예: "월미공원" -> "월미공원" 키 형태
+  "월미문화의거리",
+  "월미공원",
+  "월미바다",
+  "탑승동",
+  "제1터미널",
+  "제2터미널",
+];
+const EXCLUDED_STATION_KEYS = new Set(EXCLUDED_STATION_NAMES.map(normStationKey));
+const filteredStations = dedup2.filter(s => !EXCLUDED_STATION_KEYS.has(s.key));
+
+return { lines: linesArray, stations: dedup2, lineStops: lineStopsObj };
+
 }
 
 
+function pickStationsForLine(lineName, allStations, lineSegs, manualByLine) {
+  const allow = new Set((manualByLine?.[lineName] || []).map(x => x.key));
+
+  const THRESH_M = 300; // 이건 보조
+  const out = [];
+
+  for (const st of allStations) {
+    // 1) 화이트리스트가 있으면 그것만 통과
+    if (allow.size > 0 && !allow.has(st.key)) continue;
+
+    // 2) (보조) 선로 근접 체크
+    if (distanceToLineMeters(st, lineSegs) <= THRESH_M) out.push(st);
+  }
+  return out;
+}
     function sortLineEntries(entries){
       function keyFor(name){const m=name.match(/^(\d+)호선$/);if(m)return{type:'num',val:parseInt(m[1],10)};return{type:'txt',val:name};}
       return entries.sort(([aName],[bName])=>{const A=keyFor(aName),B=keyFor(bName);if(A.type!==B.type)return A.type==='num'?-1:1;if(A.type==='num')return A.val-B.val;return aName.localeCompare(bName,'ko');});
     }
 
-	function drawBaseMarkers(stations) {
-        // 흰색 기본 마커 아이콘 정의 (CSS에서 흰색으로 정의했기 때문에 별도 style 지정 불필요)
-        const baseIcon = L.divIcon({
-            className: 'base-station-marker',
-            html: `<div class='station-icon'></div>`,
-            iconSize: [12, 12],      /* 크기는 CSS의 10px + 테두리 1px에 맞게 */
-            iconAnchor: [6, 6]       /* 중앙 정렬 */
-        });
+function drawBaseMarkers(stations) {
+  const excludeKeys = new Set(
+    ["월미공원", "월미문화의거리", "월미바다", "박물관", "탑승동", "제1터미널", "제2터미널"].map(normStationKey) // 필요하면 추가
+  );
 
-        stations.forEach(s => {
-            // 마커를 추가하지만, 나중에 검색으로 발견한 마커(노선색 마커)와 겹치지 않도록
-            // zIndexOffset을 낮게 설정합니다.
-            L.marker([s.lat, s.lon], { 
-                icon: baseIcon,
-                zIndexOffset: 100 // 검색 마커보다 낮게 설정
-            }).addTo(map);
-        });
-    }
+  const baseIcon = L.divIcon({
+    className: 'base-station-marker',
+    html: `<div class='station-icon'></div>`,
+    iconSize: [12, 12],
+    iconAnchor: [6, 6]
+  });
+
+  stations.forEach(s => {
+    if (excludeKeys.has(s.key)) return; // ✅ 여기서 컷
+    L.marker([s.lat, s.lon], {
+      icon: baseIcon,
+      zIndexOffset: 100
+    }).addTo(map);
+  });
+}
     let subwayData={lines:[],stations:[]};
-    const shownStations=new Map(), lineStats={};
+    const shownStations=new Map();
     let totalStationsCount = 0;
     let matchedStationsCount = 0;
-
+window.lineStats = window.lineStats || {};
+const lineStats = window.lineStats;
     function drawLines(lines){
       lines.forEach(Ln=>{
         lineStats[Ln.name]=lineStats[Ln.name]||{total:0,matched:0,color:Ln.color};
@@ -519,25 +733,30 @@ function nearestLineForStation(station){
   if (ov?.primary) return ov.primary; // 문자열로 반환
   return nearestLine(station.lat, station.lon).name; // 기존 거리 기반
 }
-	function computeTotals(){
-	  // 모든 노선의 total 초기화
-	  Object.keys(lineStats).forEach(name => {
-		  lineStats[name].total = 0;
-	  });
+function computeTotals() {
+  const data = window.subwayData;
+  if (!data) return;
 
-	  totalStationsCount = subwayData.stations.length; // 중복 없는 전체 고유 역 개수
+  const ls = data.lineStops || {};
 
-	  subwayData.stations.forEach(s => {
-		// 해당 역이 반경 내에 포함된 모든 노선을 찾습니다.
-		const nearbyLines = getNearbyLines(s.lat, s.lon); 
-		
-		nearbyLines.forEach(lineName => {
-		  if (lineStats[lineName]) {
-			lineStats[lineName].total += 1; // 우이신설선 포함 모든 해당 노선의 total 증가
-		  }
-		});
-	  });
-	}
+  // total 세팅
+  for (const lineName of Object.keys(ls)) {
+    const arr = ls[lineName] || [];
+    lineStats[lineName] = lineStats[lineName] || { total: 0, matched: 0, color: colorMap[lineName] || "#003DA5" };
+    lineStats[lineName].total = arr.length;
+    lineStats[lineName].color = colorMap[lineName] || lineStats[lineName].color || "#003DA5";
+    if (typeof lineStats[lineName].matched !== "number") lineStats[lineName].matched = 0;
+  }
+
+  // lineStops에 없는 잔재 제거
+  for (const k of Object.keys(lineStats)) {
+    if (!(k in ls)) delete lineStats[k];
+  }
+  const uniq = new Set();
+Object.values(window.subwayData.lineStops || {}).forEach(arr => arr.forEach(k => uniq.add(k)));
+totalStationsCount = uniq.size;
+}
+
 
     /* ------------------------------------------------ */
     /* PC 환경: 사이드바 업데이트 함수 (기존 로직) */
@@ -555,7 +774,7 @@ function nearestLineForStation(station){
       });
     }
     
-	const MAX_DISTANCE_SQ = 0.000004; // 0.002 * 0.002 = 0.000004 (경위도 제곱 거리)
+	const MAX_DISTANCE_SQ = 0.000002; // 0.002 * 0.002 = 0.000004 (경위도 제곱 거리)
 
     function getNearbyLines(lat, lon) {
         const nearbyLines = new Set();
@@ -637,6 +856,7 @@ function nearbyLinesForStation(station){
     /* 통합 업데이트 함수 (환경에 따라 호출) */
     /* ------------------------------------------------ */
     function updateUI(){
+
         // 화면 너비에 따라 다른 UI 업데이트 함수 호출
         if (window.innerWidth <= 768) {
             updateDashboard();
@@ -644,61 +864,121 @@ function nearbyLinesForStation(station){
             updateSidebar();
         }
     }
-
+function linesForStationKey(stKey) {
+  const data = window.subwayData;
+  const out = [];
+  const stops = data?.lineStops || {};
+  for (const [lineName, keys] of Object.entries(stops)) {
+    if (keys.includes(stKey)) out.push(lineName);
+  }
+  return out;
+}
 
     async function init(){
       try{
+	  // ✅ 노선도/검색 결과에서 완전히 제외할 역들 (월미바다열차)
+function excludeStationsEverywhere(names) {
+  const keys = new Set();
+    const excludeKeys = new Set(names.map(normStationKey));
+  for (const nm of names) keys.add(normStationKey(nm));
+
+  // 1) 검색 대상(=stations)에서 제거
+  window.subwayData.stations = (window.subwayData.stations || []).filter(s => !keys.has(s.key));
+
+  // 2) lineStops(노선별 정차역 목록)에서도 제거 → total/카운트 꼬임 방지
+  const ls = window.subwayData.lineStops || {};
+  for (const lineName of Object.keys(ls)) {
+    ls[lineName] = (ls[lineName] || []).filter(k => !keys.has(k));
+  }
+  window.subwayData.lineStops = ls;
+}
 const raw = await fetchOverpass(overpassQuery);
+window.rawOverpass = raw;
 console.log("elements:", raw.elements.length);
 
-        subwayData=parseData(raw);
-		window.subwayData = subwayData;
-		window.rawOverpass = raw;
-		console.log("Parsed Data:", subwayData); // 파싱 잘 됐나 확인용
-		if (subwayData.lines.length === 0) {
-       console.warn("노선 데이터가 없심더! BBox나 쿼리를 확인해보이소.");
-    }
-        drawLines(subwayData.lines);
-        computeTotals(); 
-		drawBaseMarkers(subwayData.stations);
-        updateUI(); // 초기 UI 업데이트 (반응형)
-        
-        const bounds=L.latLngBounds([]);
-        subwayData.lines.forEach(Ln=>Ln.segs.forEach(seg=>seg.forEach(p=>bounds.extend(p))));
-        if(bounds.isValid())map.fitBounds(bounds.pad(0.05));
-      }catch(e){alert('초기화 오류: '+e.message);console.error(e);}
-    }
+// ✅ parseData는 한 번만
+subwayData = window.subwayData = parseData(raw);
+
+// ✅ 삭제할 역 이름은 '배열'로 따로 둔다
+const EXCLUDED_NAMES = ["월미공원", "월미문화의거리", "월미바다", "박물관", "탑승동", "제1터미널", "제2터미널"]; 
+const excludeKeys = new Set(EXCLUDED_NAMES.map(normStationKey));
+
+// 1) stations(검색/결과)에서 제거
+window.subwayData.stations = (window.subwayData.stations || []).filter(
+  s => !excludeKeys.has(s.key)
+);
+
+// 2) lineStops(노선 총역수/카운트용)에서도 제거
+const ls = window.subwayData.lineStops || {};
+for (const lineName of Object.keys(ls)) {
+  ls[lineName] = (ls[lineName] || []).filter(k => !excludeKeys.has(k));
+}
+window.subwayData.lineStops = ls;
+
+// 전역 변수도 같은 객체로
+subwayData = window.subwayData;
+
+console.log("Parsed Data:", subwayData);
+
+if (subwayData.lines.length === 0) {
+  console.warn("노선 데이터가 없심더! BBox나 쿼리를 확인해보이소.");
+}
+
+drawLines(subwayData.lines);
+computeTotals();
+drawBaseMarkers(subwayData.stations);
+updateUI();
+
+// bounds도 동일하게
+const bounds = L.latLngBounds([]);
+subwayData.lines.forEach(Ln => Ln.segs.forEach(seg => seg.forEach(p => bounds.extend(p))));
+if (bounds.isValid()) map.fitBounds(bounds.pad(0.05));
+subwayData.lines.forEach(Ln=>Ln.segs.forEach(seg=>seg.forEach(p=>bounds.extend(p)))); 
+if(bounds.isValid())map.fitBounds(bounds.pad(0.05)); }
+catch(e){alert('초기화 오류: '+e.message);console.error(e);} }
 
     // ********* 검색 입력 처리 로직 수정 *********
     const inputPC = document.getElementById('stationSearchPC');
     const inputMobile = document.getElementById('stationSearchMobile');
-    
-    const searchHandler = (e, inputElement) => {
-      if(e.key==='Enter'){
-        const key=normStationKey(inputElement.value.replace(/\./g,'·'));
-        if(!key)return;
-const foundList = subwayData.stations.filter(s => s.key === key);
-if (foundList.length === 0) {
-  alert('정확히 일치하는 역명을 찾을 수 없습니다.');
-  return;
-}
 
-const center = map.getCenter();
+const searchHandler = (e, inputElement) => {
+  if (e.key !== 'Enter') return;
 
-const targets = foundList
-  .filter(s => typeof s.lat !== 'undefined' && s.lat !== null)
-  .map(s => ({ s, d2: (s.lat - center.lat)**2 + (s.lon - center.lng)**2 }))
-  .sort((a, b) => a.d2 - b.d2)
-  .map(x => x.s);
+  const data = window.subwayData;
+  if (!data || !Array.isArray(data.stations)) {
+    alert("데이터가 아직 로드되지 않았습니다.");
+    return;
+  }
 
-if (targets.length === 0) return;
+  const input = (inputElement.value || "").replace(/\./g,'·');
+  const key = normStationKey(input);
+  if (!key) return;
 
-for (const st of targets) {
-  const stationId = `${st.lat.toFixed(5)}-${st.lon.toFixed(5)}`;
+  const foundList = data.stations.filter(s => s.key === key);
+  if (foundList.length === 0) {
+    alert("정확히 일치하는 역명을 찾을 수 없습니다.");
+    return;
+  }
 
-  if (!shownStations.has(stationId)) {
-    const nearest = nearestLine(st.lat, st.lon);
-    const connectingLines = getNearbyLines(st.lat, st.lon);
+  const center = map.getCenter();
+
+  const targets = foundList
+    .filter(s => typeof s.lat !== 'undefined' && s.lat !== null)
+    .map(s => ({ s, d2: (s.lat - center.lat)**2 + (s.lon - center.lng)**2 }))
+    .sort((a, b) => a.d2 - b.d2)
+    .map(x => x.s);
+
+  if (targets.length === 0) return;
+
+  for (const st of targets) {
+    const stationId = st.key;
+    if (shownStations.has(stationId)) continue;
+
+	let connectingLines = linesForStationKey(st.key);
+    const nearest =
+      connectingLines.length > 0
+        ? (data.lines.find(L => L.name === connectingLines[0]) || nearestLine(st.lat, st.lon))
+        : nearestLine(st.lat, st.lon);
 
     const icon = L.divIcon({
       className: '',
@@ -707,36 +987,41 @@ for (const st of targets) {
       iconAnchor: [7, 7]
     });
 
-    const m = L.marker([st.lat, st.lon], { icon, zIndexOffset: 1000 }).addTo(map);
+    const marker = L.marker([st.lat, st.lon], { icon, zIndexOffset: 1000 }).addTo(map);
     L.tooltip({ permanent: true, direction: 'top', className: 'label-text' })
       .setLatLng([st.lat, st.lon])
       .setContent(st.name)
       .addTo(map);
 
-    shownStations.set(stationId, m);
+    shownStations.set(stationId, marker);
 
-    connectingLines.forEach(name => {
-      if (name) {
-        lineStats[name] = lineStats[name] || { total: 0, matched: 0, color: colorMap[name] || '#003DA5' };
-        lineStats[name].matched += 1;
-      }
-    });
-  }
+if (connectingLines.length === 0) {
+  connectingLines = nearbyLinesForStation(st); // 이미 만들어둔 함수
 }
 
-updateUI();
+// ✅ 그래도 없으면 최후: nearest 1개만
+if (connectingLines.length === 0) {
+  const one = nearestLineForStation(st);
+  if (one) connectingLines = [one];
+}
 
-inputElement.value = '';
-map.panTo([targets[0].lat, targets[0].lon]);
+// (선택) 디버그: 어떤 역이 lineStops에 없었는지 로그
+if (!linesForStationKey(st.key).length) {
+  console.warn("[lineStops miss]", st.name, st.key, "fallback:", connectingLines);
+}
 
-// 이동은 “가장 가까운 것”으로만
-const first = targets[0];
-inputElement.value = '';
-map.panTo([first.lat, first.lon]);
-        }
-        inputElement.value='';map.panTo([found.lat,found.lon]);
-      };
+for (const name of connectingLines) {
+  if (!name) continue;
+  lineStats[name] = lineStats[name] || { total: 0, matched: 0, color: colorMap[name] || '#003DA5' };
+  lineStats[name].matched += 1;
+}
+  }
 
+  updateUI();
+
+  inputElement.value = '';
+  map.panTo([targets[0].lat, targets[0].lon]);
+};
     if (inputPC) inputPC.addEventListener('keypress', e => searchHandler(e, inputPC));
     if (inputMobile) inputMobile.addEventListener('keypress', e => searchHandler(e, inputMobile));
     
