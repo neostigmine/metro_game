@@ -900,7 +900,7 @@ console.log("elements:", raw.elements.length);
 subwayData = window.subwayData = parseData(raw);
 
 // ✅ 삭제할 역 이름은 '배열'로 따로 둔다
-const EXCLUDED_NAMES = ["월미공원", "월미문화의거리", "월미바다", "박물관", "탑승동", "제1터미널", "제2터미널"]; 
+const EXCLUDED_NAMES = ["월미공원", "월미문화의거리", "월미바다", "박물관", "탑승동", "제1터미널", "제2터미널", "천안아산역"]; 
 const excludeKeys = new Set(EXCLUDED_NAMES.map(normStationKey));
 
 // 1) stations(검색/결과)에서 제거
