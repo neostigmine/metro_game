@@ -3,9 +3,139 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>수도권 지하철 (반응형 v8)</title>
+  <title>수도권 지하철 역명 맞추기</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
+  #optionsBtn,
+.options-button{
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0 !important;
+  border: 1px solid rgba(0,0,0,.15);
+  border-radius: 12px;
+  background: rgba(255,255,255,.95);
+  color: #111;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  flex: 0 0 auto;
+  z-index: 20001;
+}
+.search-box{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.options-wrap { position: relative; display: inline-block; }
+
+.options-item-btn{
+  width: 100%;
+  text-align: left;
+  padding: 10px 10px;
+  border-radius: 10px;
+  background: transparent;
+  border: 0;
+  font-size: 14px;
+  color: #111;
+  cursor: pointer;
+}
+
+.options-menu{
+  position: absolute;
+  right: 0;
+  top: 44px;
+  min-width: 190px;
+  background: rgba(255,255,255,.98);
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.12);
+  padding: 8px;
+  z-index: 20000;
+}
+
+.options-item{
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 10px;
+  border-radius: 10px;
+  font-size: 14px;
+  color: #111;
+}
+
+.options-item-btn:hover{ background: rgba(0,0,0,.05); }
+
+
+.station-input{
+  flex: 1 1 auto;
+  min-width: 0; /* ✅ flex에서 input이 버튼을 밀어내지 않게 */
+}
+
+.options-wrap{
+  flex: 0 0 auto;
+}
+.search-box{ overflow: visible; }
+
+.ui-btn{
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(0,0,0,0.15);
+  background: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ui-btn.danger{
+  background: #ffeded;
+  border-color: rgba(255,0,0,0.2);
+}
+
+.modal-backdrop{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+}
+
+.modal{
+  width: min(420px, 90vw);
+  background: #fff;
+  border-radius: 14px;
+  padding: 14px 14px 12px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+}
+
+.modal-title{
+  font-size: 15px;
+  font-weight: 900;
+  margin-bottom: 8px;
+}
+
+.modal-body{
+  font-size: 13px;
+  line-height: 1.35;
+  margin-bottom: 12px;
+}
+
+.modal-actions{
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+#overlayControls{
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 100000; /* leaflet보다 크게 */
+  display: flex;
+  gap: 8px;
+}
     /* ========================================================== */
     /* 1. PC 기본 스타일 (원본 파일의 스타일 유지) */
     /* ========================================================== */
@@ -46,13 +176,42 @@
      box-shadow: 0 0 1px rgba(0,0,0,.4); /* 그림자 약하게 */
 	}
 	.label-text {background-color: transparent; border: none; box-shadow: none; font-size: 13px; font-weight: 800; color: #111; text-shadow: 0 0 2px #fff, 0 0 4px #fff; white-space: nowrap;}    
-	.label-text {background-color: transparent; border: none; box-shadow: none; font-size: 13px; font-weight: 800; color: #111; text-shadow: 0 0 2px #fff, 0 0 4px #fff; white-space: nowrap;}
 	.leaflet-tooltip-top.label-text::before,
 	.leaflet-tooltip-bottom.label-text::before,
 	.leaflet-tooltip-left.label-text::before,
 	.leaflet-tooltip-right.label-text::before {
 		border: none !important;
 	}
+	
+	.options-wrap { position: relative; display: inline-block; }
+
+.options-menu{
+  position: absolute;
+  right: 0;
+  top: 44px;
+  min-width: 190px;
+  background: rgba(255,255,255,.98);
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.12);
+  padding: 8px;
+  z-index: 20000;
+}
+
+.options-item{
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 10px;
+  border-radius: 10px;
+  font-size: 14px;
+  color: #111;
+  user-select: none;
+}
+
+.options-item:hover{ background: rgba(0,0,0,.05); }
+.options-item input{ transform: scale(1.1); }
+
     /* ========================================================== */
     /* 2. 모바일 스타일 (Media Query: 화면 너비 768px 이하) */
     /* ========================================================== */
@@ -128,16 +287,26 @@
             display: flex;
         }
     }
-
   </style>
 </head>
 <body>
   <div id="map"></div>
 
-  <div class="topbar">
-    <strong>수도권 지하철</strong>
-    <input type="text" id="stationSearchPC" placeholder="역 이름을 입력" />
+<div class="topbar">
+  <strong>수도권 지하철</strong>
+  <input type="text" id="stationSearchPC" placeholder="역 이름을 입력" />
+
+  <div class="options-wrap">
+    <button class="options-button" id="optionsBtnPC" type="button" aria-label="옵션">⋮</button>
+
+<div class="options-menu" id="optionsMenuPC" hidden>
+  <button class="options-item-btn" id="toggleAltNameBtnPC" type="button">
+    부역명/병기역명 표시
+  </button>
+</div>
+
   </div>
+</div>
   
   <div class="sidebar">
     <h3>노선 목록</h3>
@@ -153,23 +322,24 @@
         </div>
   </div>
 
-  <div class="search-box">
-    <input type="text" id="stationSearchMobile" placeholder="역 이름을 입력" class="station-input" />
-    <button class="options-button">⋮</button>
+<div class="search-box">
+  <input type="text" id="stationSearchMobile" placeholder="역 이름을 입력" class="station-input" />
+
+  <div class="options-wrap">
+    <button class="options-button" id="optionsBtn" type="button" aria-label="옵션">⋮</button>
+
+<div class="options-menu" id="optionsMenuPC" hidden>
+  <button class="options-item-btn" id="toggleAltNameBtnPC" type="button">
+    부역명/병기역명 표시
+  </button>
+</div>
   </div>
+</div>
 
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-	const MANUAL_STATIONS = [
-  {
-    id: "manual:gyeonggang:chowol",
-    name: "초월",
-    line: "경강선",
-    lat: 37.37,
-    lon: 127.29,
-  },
-];
+
     // 노선 색상, toCanonicalLine, normStationKey, fetchOverpass, parseData, sortLineEntries, drawLines, nearestLine, computeTotals 함수는 동일하게 유지
     const map = L.map('map', {
     renderer: L.canvas() // 이 한 줄이 랙을 엄청나게 줄여줍니다!
@@ -863,6 +1033,8 @@ function drawBaseMarkers(stations) {
   });
 }
     let subwayData={lines:[],stations:[]};
+	const SETTINGS_KEY = "subway:v8:hideAltName";
+let hideAltName = (localStorage.getItem(SETTINGS_KEY) === "1");
     const shownStations=new Map();
     let totalStationsCount = 0;
     let matchedStationsCount = 0;
@@ -1157,7 +1329,7 @@ function linesForStationResolved(st) {
   const one = nearestLineForStation(st);
   return one ? [one] : [];
 }
-
+//병기역명, 부역명 리스트
 window.MANUAL_ALIAS = new Map([
 //1호선
   [normStationKey("나사렛대"), normStationKey("쌍용")],
@@ -1166,6 +1338,28 @@ window.MANUAL_ALIAS = new Map([
   [normStationKey("삼양그룹"), normStationKey("종로5가")],
   [normStationKey("순천향대"), normStationKey("신창")],
   [normStationKey("아산현충사"), normStationKey("온양온천")],
+  [normStationKey("서정대학교"), normStationKey("덕정")],
+  [normStationKey("신한대 제1캠퍼스"), normStationKey("망월사")],
+  [normStationKey("도봉구청"), normStationKey("방학")],
+  [normStationKey("동양미래대학"), normStationKey("구일")],
+  [normStationKey("가톨릭대"), normStationKey("역곡")],
+  [normStationKey("서울신대"), normStationKey("소사")],
+  [normStationKey("부천대학교"), normStationKey("부천")],
+  [normStationKey("가톨릭대 인천성모병원"), normStationKey("부평")],
+  [normStationKey("인천사랑병원"), normStationKey("주안")],
+  [normStationKey("인천대학교 제물포캠퍼스"), normStationKey("제물포")],
+  [normStationKey("민주화운동기념관"), normStationKey("남영")],
+  [normStationKey("안양예술공원"), normStationKey("관악")],
+  [normStationKey("성결대"), normStationKey("명학")],
+  [normStationKey("지샘병원"), normStationKey("군포")],
+  [normStationKey("한세대"), normStationKey("당정")],
+  [normStationKey("한국교통대"), normStationKey("의왕")],
+  [normStationKey("스타필드 수원"), normStationKey("화서")],
+  [normStationKey("국제대학"), normStationKey("서정리")],
+  [normStationKey("한경국립대"), normStationKey("평택지제")],
+  [normStationKey("남서울대"), normStationKey("성환")],
+  [normStationKey("선문대"), normStationKey("아산")],
+
 //2호선/
   [normStationKey("하나은행"), normStationKey("을지로입구")],
   [normStationKey("신한카드"), normStationKey("을지로3가")],
@@ -1201,6 +1395,10 @@ window.MANUAL_ALIAS = new Map([
   [normStationKey("예술의전당"), normStationKey("남부터미널")],
   [normStationKey("서초구청"), normStationKey("양재")],
   [normStationKey("서울주택도시개발공사"), normStationKey("대청")],
+  [normStationKey("고양아람누리"), normStationKey("정발산")],
+  [normStationKey("건강보험일산병원"), normStationKey("백석")],
+  [normStationKey("중부대학교"), normStationKey("삼송")],
+  
  //4호선/
   [normStationKey("강북구청"), normStationKey("수유")],
   [normStationKey("서울사이버대학"), normStationKey("미아")],
@@ -1214,6 +1412,14 @@ window.MANUAL_ALIAS = new Map([
   [normStationKey("국립중앙박물관"), normStationKey("이촌")],
   [normStationKey("현충원"), normStationKey("동작")],
   [normStationKey("총신대입구"), normStationKey("이수")],
+  [normStationKey("경복대"), normStationKey("진접")],
+  [normStationKey("한림대성심병원"), normStationKey("평촌")],
+  [normStationKey("원광대산본병원"), normStationKey("산본")],
+  [normStationKey("안산대학교"), normStationKey("상록수")],
+  [normStationKey("서울예술대학교"), normStationKey("중앙역")],
+  [normStationKey("고대안산병원"), normStationKey("고잔")],
+  [normStationKey("신안산대학교"), normStationKey("초지")],
+  [normStationKey("시화병원"), normStationKey("정왕")],
 //5호선/
   [normStationKey("홈앤쇼핑"), normStationKey("마곡")],
   [normStationKey("에스앤유서울병원"), normStationKey("발산")],
@@ -1266,6 +1472,11 @@ window.MANUAL_ALIAS = new Map([
   [normStationKey("성공회대입구"), normStationKey("온수")],
   [normStationKey("부천아트센터"), normStationKey("부천시청")],
   [normStationKey("거북시장"), normStationKey("석남")],
+  [normStationKey("부천우리병원"), normStationKey("부천종합운동장")],
+  [normStationKey("예손병원"), normStationKey("춘의")],
+  [normStationKey("인본병원"), normStationKey("상동")],
+  [normStationKey("한국만화박물관.웹툰융합센터"), normStationKey("삼산체육관")],
+  [normStationKey("강남콩나무병원"), normStationKey("부평구청")],
 //8호선/
   [normStationKey("구리전통시장"), normStationKey("구리")],
   [normStationKey("평화의문"), normStationKey("몽촌토성")],
@@ -1308,7 +1519,27 @@ window.MANUAL_ALIAS = new Map([
   [normStationKey("전문건설회관"), normStationKey("보라매병원")],
   [normStationKey("서울대"), normStationKey("관악산")],
   [normStationKey("김포시청"), normStationKey("사우")],
+
 ]);
+function escapehtml(s){
+  return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function getAltNameForStation(st){
+  // 프로젝트마다 다르니, 너가 실제로 쓰는 필드명으로 1개만 남기면 됨.
+  return st.altName || st.alias || st._aliasText || st.oneAliasKey || "";
+}
+
+function buildStationLabelHTML(st){
+  const alt = st._altText || "";
+  if (!alt || hideAltName) return escapehtml(st.name);
+  // 줄바꿈 표기(Leaflet tooltip은 HTML을 그대로 렌더링함)
+  return `<div style="text-align:center;">${escapehtml(st.name)}</div><span class="alt-name">(${escapehtml(alt)})</span>`;
+}
+function refreshAllLabels(){
+  for (const v of shownStations.values()){
+    if (v.tooltip && v.st) v.tooltip.setContent(buildStationLabelHTML(v.st));
+  }
+}
 
 function applyManualAlias(userText) {
   const k = normStationKey((userText || "").replace(/\./g,'·'));
@@ -1362,7 +1593,7 @@ const foundList = data.stations.filter(s => normStationKey(s.key || s.name || ""
 
 const aliases = REVERSE_ALIAS.get(st.key);
 const oneAliasKey = aliases ? [...aliases][0] : "";
-const label = oneAliasKey ? `${st.name}(${oneAliasKey})` : st.name;
+const label = oneAliasKey ? `<div style="text-align:center;">${st.name}</div>(${escapehtml(oneAliasKey)})` : st.name;
 
 const stationId = `${st.key}@${st.lat.toFixed(6)},${st.lon.toFixed(6)}`;
 if (shownStations.has(stationId)) continue;	
@@ -1387,12 +1618,13 @@ const icon = L.divIcon({
 
 
     const marker = L.marker([st.lat, st.lon], { icon, zIndexOffset: 1000 }).addTo(map);
-    L.tooltip({ permanent: true, direction: 'top', className: 'label-text' })
-      .setLatLng([st.lat, st.lon])
-.setContent(label)
-      .addTo(map);
+	st._altText = oneAliasKey || "";   // ✅ 토글용으로 저장
 
-    shownStations.set(stationId, marker);
+const tooltip = L.tooltip({ permanent: true, direction: 'top', className: 'label-text' })
+  .setLatLng([st.lat, st.lon])
+  .setContent(buildStationLabelHTML(st))
+  .addTo(map);
+shownStations.set(stationId, { marker, tooltip, st });
 
 if (connectingLines.length === 0) {
   connectingLines = nearbyLinesForStation(st); // 이미 만들어둔 함수
@@ -1428,6 +1660,72 @@ for (const name of connectingLines) {
     window.addEventListener('resize', updateUI);
 
     init();
+	const optionsBtn = document.getElementById("optionsBtn");
+const optionsMenu = document.getElementById("optionsMenu");
+const toggleAltName = document.getElementById("toggleAltName");
+
+if (toggleAltName) toggleAltName.checked = hideAltName;
+
+function closeOptionsMenu(){
+  if (optionsMenu) optionsMenu.hidden = true;
+}
+
+if (optionsBtn && optionsMenu) {
+  optionsBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    optionsMenu.hidden = !optionsMenu.hidden;
+  });
+}
+
+document.addEventListener("click", () => closeOptionsMenu());
+
+if (optionsMenu) {
+  optionsMenu.addEventListener("click", (e) => e.stopPropagation());
+}
+
+if (toggleAltName) {
+  toggleAltName.addEventListener("change", () => {
+    hideAltName = !!toggleAltName.checked;
+    localStorage.setItem(SETTINGS_KEY, hideAltName ? "1" : "0");
+    refreshAllLabels();
+    closeOptionsMenu();
+  });
+}
+function setMenuText(btn){
+  if (!btn) return;
+  btn.textContent = hideAltName ? "부역명/병기역명 표시" : "부역명/병기역명 숨기기";
+}
+function bindOptionsMenu(btnId, menuId, toggleBtnId) {
+  const btn = document.getElementById(btnId);
+  const menu = document.getElementById(menuId);
+  const toggleBtn = document.getElementById(toggleBtnId);
+  if (!btn || !menu || !toggleBtn) return;
+
+  setMenuText(toggleBtn);
+
+  const close = () => { menu.hidden = true; };
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    menu.hidden = !menu.hidden;
+  });
+
+  menu.addEventListener("click", (e) => e.stopPropagation());
+  document.addEventListener("click", close);
+
+  toggleBtn.addEventListener("click", () => {
+    hideAltName = !hideAltName;
+    localStorage.setItem(SETTINGS_KEY, hideAltName ? "1" : "0");
+    setMenuText(toggleBtn);
+    refreshAllLabels();  // ✅ F5 없이 즉시 반영
+    close();
+  });
+}
+
+bindOptionsMenu("optionsBtnPC", "optionsMenuPC", "toggleAltNameBtnPC");
+bindOptionsMenu("optionsBtn",   "optionsMenu",   "toggleAltNameBtn");
+
+
   </script>
 </body>
 </html>
