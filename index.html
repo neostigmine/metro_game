@@ -207,7 +207,6 @@ relation["public_transport"="station"]["amenity"!="bus_station"](${bbox[0]},${bb
   relation(17413295) ->.gtxa;
   .gtxa;
 );
-out body;
 out geom;`
 
 
@@ -273,38 +272,169 @@ if (/GTX\s*-?\s*A/i.test(n) || /광역급행철도\s*A/i.test(n) || n === "A노�
     function normStationKey(s=""){
       return s.trim().normalize('NFKC').replace(/[\(\)\[\]{}]/g,'').replace(/\s+/g,'').replace(/[·\.‧∙・․]/g,'·').replace(/역$/,'').toLowerCase();
     }
-async function fetchOverpass(overpassQuery) {
-  const url = "https://overpass-api.de/api/interpreter";
+	
+	// =====================
+// Overpass 캐시 (IndexedDB)
+// =====================
+const OVERPASS_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 3; // 3일 (원하면 조절)
+const OVERPASS_CACHE_DB = "subway-overpass-cache-v1";
+const OVERPASS_CACHE_STORE = "kv";
 
-  let res, text;
-  try {
-    res = await fetch(url, { method: "POST", body: overpassQuery });
-    text = await res.text();
-  } catch (err) {
-    console.error("Overpass fetch failed:", err);
-    throw err;
+function fnv1a(str) {
+  // 짧은 해시(키 길이 줄이기용)
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+  }
+  return ("0000000" + h.toString(16)).slice(-8);
+}
+
+function openCacheDB() {
+  return new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) return reject(new Error("IndexedDB not supported"));
+    const req = indexedDB.open(OVERPASS_CACHE_DB, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(OVERPASS_CACHE_STORE)) {
+        db.createObjectStore(OVERPASS_CACHE_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function cacheGet(key) {
+  const db = await openCacheDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(OVERPASS_CACHE_STORE, "readonly");
+    const store = tx.objectStore(OVERPASS_CACHE_STORE);
+    const req = store.get(key);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+    tx.oncomplete = () => db.close();
+  });
+}
+
+async function cacheSet(key, value) {
+  const db = await openCacheDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(OVERPASS_CACHE_STORE, "readwrite");
+    const store = tx.objectStore(OVERPASS_CACHE_STORE);
+    const req = store.put(value, key);
+    req.onsuccess = () => resolve(true);
+    req.onerror = () => reject(req.error);
+    tx.oncomplete = () => db.close();
+  });
+}
+
+async function getOverpassWithCache(query, opts = {}) {
+  const { forceNetwork = false } = opts;
+
+  const qh = fnv1a(query);
+  const key = `overpass:${qh}`;
+
+  if (!forceNetwork) {
+    // 1) 캐시가 있으면 "무조건" 사용 (시간 제한 없음)
+    try {
+      const hit = await cacheGet(key);
+      if (hit && hit.data) {
+        console.log("[Overpass cache] HIT", hit.savedAt ? new Date(hit.savedAt).toISOString() : "");
+        return { data: hit.data, fromCache: true };
+      }
+      console.log("[Overpass cache] MISS");
+    } catch (e) {
+      console.warn("[Overpass cache] read failed -> no-cache mode", e);
+    }
   }
 
-  console.log("OVERPASS status:", res.status);
-  console.log("OVERPASS head:", text.slice(0, 600));
+  // 2) 네트워크 fetch
+  const fresh = await fetchOverpass(query);
 
-  if (!res.ok) {
-    throw new Error(`Overpass HTTP ${res.status}`);
-  }
-
-  let data;
+  // 3) 저장 (덮어쓰기)
   try {
-    data = JSON.parse(text);
+    await cacheSet(key, { savedAt: Date.now(), data: fresh });
+    console.log("[Overpass cache] SAVED");
   } catch (e) {
-    throw new Error("Overpass returned non-JSON (query parse error / HTML error). See console OVERPASS head.");
+    console.warn("[Overpass cache] save failed (quota/private mode?)", e);
   }
 
-  if (!data || !Array.isArray(data.elements)) {
-    throw new Error("Overpass JSON missing 'elements'. See console.");
+  return { data: fresh, fromCache: false };
+}
+
+
+// (선택) 콘솔에서 캐시 삭제: await window.clearOverpassCache()
+window.clearOverpassCache = async () => {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.deleteDatabase(OVERPASS_CACHE_DB);
+    req.onsuccess = () => resolve(true);
+    req.onerror = () => reject(req.error);
+  });
+};
+
+	
+	async function fetchOverpassCached(query, cacheKey, maxAgeHours = 24) {
+  const now = Date.now();
+  const raw = localStorage.getItem(cacheKey);
+  if (raw) {
+    try {
+      const obj = JSON.parse(raw);
+      const ageH = (now - (obj.savedAt || 0)) / 36e5;
+      if (obj.data && ageH <= maxAgeHours) {
+        console.log("[cache] hit", cacheKey, `age=${ageH.toFixed(2)}h`);
+        return obj.data;
+      }
+    } catch {}
   }
-  window.rawOverpass = data; 
+
+  const data = await fetchOverpass(query); // 기존 함수 그대로 사용
+  try {
+    localStorage.setItem(cacheKey, JSON.stringify({ savedAt: now, data }));
+    console.log("[cache] saved", cacheKey);
+  } catch (e) {
+    console.warn("[cache] save failed (quota?)", e);
+  }
   return data;
 }
+
+const ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
+];
+
+async function fetchOverpass(overpassQuery) {
+  const body = "data=" + encodeURIComponent(overpassQuery);
+
+  let lastErr = null;
+  for (const url of ENDPOINTS) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+        body,
+      });
+
+      const text = await res.text();
+      console.log("OVERPASS status:", res.status, "via", url);
+      console.log("OVERPASS head:", text.slice(0, 300));
+
+      if (!res.ok) {
+        // 504/5xx면 다른 서버로
+        lastErr = new Error(`Overpass HTTP ${res.status} via ${url}`);
+        if (res.status === 504 || res.status >= 500) continue;
+        throw lastErr;
+      }
+      return JSON.parse(text);
+    } catch (e) {
+      lastErr = e;
+      // CORS로 막히는 서버도 있으니 그땐 다음 엔드포인트로
+      continue;
+    }
+  }
+  throw lastErr || new Error("All Overpass endpoints failed.");
+}
+
 
       const wayMap = new Map();
 	
@@ -932,7 +1062,8 @@ function excludeStationsEverywhere(names) {
   }
   window.subwayData.lineStops = ls;
 }
-const raw = await fetchOverpass(overpassQuery);
+const CACHE_KEY = "overpass:v8:" + bbox.join(","); // bbox 바뀌면 키도 바뀜
+const { data: raw } = await getOverpassWithCache(overpassQuery);
 window.rawOverpass = raw;
 console.log("elements:", raw.elements.length);
 
