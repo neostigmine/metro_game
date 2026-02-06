@@ -6,49 +6,120 @@
   <title>수도권 지하철 역명 맞추기</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
-	  /* ✅ 대시보드의 "빈 영역"은 터치 먹지 말고 통과 */
-.dashboard, .Dashboard {
-  pointer-events: none !important;
+ /* ==========================================================
+   Base
+   ========================================================== */
+html, body, #map { height: 100%; margin: 0; }
+body {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans KR', sans-serif;
+  overflow: hidden;
 }
 
-/* ✅ 대신 대시보드 안의 실제 버튼/입력은 다시 클릭 가능 */
-.dashboard button, .dashboard input, .dashboard a,
-.Dashboard button, .Dashboard input, .Dashboard a {
-  pointer-events: auto !important;
+/* 지도는 무조건 바닥 레이어 */
+#map { position: relative; z-index: 0; }
+
+/* ==========================================================
+   PC UI (Topbar / Sidebar)
+   ========================================================== */
+.topbar {
+  position: absolute;
+  z-index: 10010;
+  top: .75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255,255,255,.95);
+  border-radius: 14px;
+  padding: .5rem .75rem;
+  font: 14px/1.2 system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans KR', sans-serif;
+  display: flex;
+  gap: .5rem;
+  align-items: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,.06);
+  pointer-events: auto;
 }
-  /* ✅ 지도 위 UI는 클릭 가능해야 함 */
-.search-container,
-.search-box,
-.options-wrap,
-#optionsBtn {
-  pointer-events: auto !important;
+.topbar input {
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  padding: .35rem .5rem;
+  font-size: 14px;
+  width: 240px;
 }
 
-/* ✅ 지도 레이어보다 위로 */
-.search-container, .search-box {
-  position: relative;
-  z-index: 50000;
+.sidebar {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 300px;
+  height: 100%;
+  background: rgba(255,255,255,.98);
+  overflow-y: auto;
+  z-index: 10000;
+  padding: .75rem .75rem 1rem;
+  border-left: 1px solid #e5e5e5;
+  box-shadow: -4px 0 8px rgba(0,0,0,.04);
+  pointer-events: auto;
+}
+.sidebar h3 { font-size: 15px; margin: 0 0 .5rem 0; }
+.line-item {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  align-items: center;
+  gap: .5rem;
+  padding: .25rem .25rem;
+  font-size: 13px;
+  border-radius: 8px;
+}
+.line-item:hover { background: rgba(0,0,0,.035); }
+.line-dot { width: 14px; height: 14px; border-radius: 50%; border: 1px solid #ddd; }
+.count { font-variant-numeric: tabular-nums; color: #333; }
+
+/* ==========================================================
+   Station Marker / Label
+   ========================================================== */
+.station-icon {
+  width: 10px;
+  height: 10px;
+  border: 1px solid #999;
+  background-color: #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 1px rgba(0,0,0,.4);
 }
 
-/* ✅ 버튼 자체도 확실히 */
-#optionsBtn {
-  position: relative;
-  z-index: 50001;
-  touch-action: manipulation; /* 모바일 탭 반응 개선 */
+.label-text {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  font-size: 13px;
+  font-weight: 800;
+  color: #111;
+  text-shadow: 0 0 2px #fff, 0 0 4px #fff;
+  white-space: nowrap;
 }
-  /* ✅ Leaflet 캔버스가 터치/클릭을 가로채지 않게 */
+.leaflet-tooltip-top.label-text::before,
+.leaflet-tooltip-bottom.label-text::before,
+.leaflet-tooltip-left.label-text::before,
+.leaflet-tooltip-right.label-text::before { border: none !important; }
+
+/* Leaflet 캔버스가 터치 먹는 경우 차단(선 클릭 안 쓸 때 추천) */
 .leaflet-overlay-pane canvas.leaflet-zoom-animated,
 .leaflet-map-pane canvas.leaflet-zoom-animated{
   pointer-events: none !important;
 }
-  #optionsBtn,
-.options-button{
-  display: inline-flex !important;
+
+/* ==========================================================
+   Options Menu (PC+Mobile 공통)
+   ========================================================== */
+.search-box, .topbar { gap: 8px; }
+
+.options-wrap { position: relative; display: inline-block; }
+
+.options-button, #optionsBtn, #optionsBtnPC {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 38px;
   height: 38px;
-  padding: 0 !important;
+  padding: 0;
   border: 1px solid rgba(0,0,0,.15);
   border-radius: 12px;
   background: rgba(255,255,255,.95);
@@ -56,15 +127,21 @@
   font-size: 20px;
   line-height: 1;
   cursor: pointer;
-  flex: 0 0 auto;
-  z-index: 20001;
+  touch-action: manipulation;
 }
-.search-box{
-  display: flex;
-  align-items: center;
-  gap: 8px;
+
+.options-menu{
+  position: absolute;
+  right: 0;
+  top: 44px;
+  min-width: 190px;
+  background: rgba(255,255,255,.98);
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.12);
+  padding: 8px;
+  z-index: 20000; /* 메뉴는 해당 UI 안에서 최상단 */
 }
-.options-wrap { position: relative; display: inline-block; }
 
 .options-item-btn{
   width: 100%;
@@ -77,253 +154,96 @@
   color: #111;
   cursor: pointer;
 }
-
-.options-menu{
-  position: absolute;
-  right: 0;
-  top: 44px;
-  min-width: 190px;
-  background: rgba(255,255,255,.98);
-  border: 1px solid #e5e5e5;
-  border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(0,0,0,.12);
-  padding: 8px;
-  z-index: 20000;
-}
-
-.options-item{
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 10px 10px;
-  border-radius: 10px;
-  font-size: 14px;
-  color: #111;
-}
-
 .options-item-btn:hover{ background: rgba(0,0,0,.05); }
 
+/* ==========================================================
+   Mobile UI
+   ========================================================== */
+/* PC에서 모바일 UI 숨김 */
+.dashboard, .search-box { display: none; }
 
-.station-input{
-  flex: 1 1 auto;
-  min-width: 0; /* ✅ flex에서 input이 버튼을 밀어내지 않게 */
+/* 모바일에서만 표시 + "지도 밖 레이어"로 고정 */
+@media (max-width: 768px) {
+  .topbar, .sidebar { display: none !important; }
+
+  .dashboard {
+    display: block;
+    position: fixed;           /* ✅ absolute 금지 */
+    top: 0; left: 0; right: 0;
+    z-index: 1000000;          /* ✅ map 위 확정 */
+    background: rgba(255,255,255,1);
+    padding: 10px 10px 5px;
+    box-shadow: 0 3px 6px rgba(0,0,0,.1);
+    pointer-events: none;      /* ✅ 빈 영역은 터치 통과 */
+  }
+  .dashboard button, .dashboard input, .dashboard a {
+    pointer-events: auto;      /* ✅ 실제 컨트롤만 터치 가능 */
+  }
+
+  .completion-rate { margin-bottom: 5px; }
+  .rate-number { font-size: 24px; font-weight: 800; color: #333; }
+  .rate-text { font-size: 16px; font-weight: 500; color: #555; margin-left: 5px; }
+
+  .line-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    max-height: 200px;
+    overflow-y: auto;
+    padding-bottom: 5px;
+  }
+  .line-group { display: flex; flex-wrap: wrap; gap: 8px; }
+  .line-button {
+    border: none;
+    color: white;
+    font-weight: 700;
+    cursor: pointer;
+    text-align: center;
+    transition: opacity 0.2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,.15);
+  }
+  .main-lines .line-button {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    font-size: 16px;
+    line-height: 38px;
+    padding: 0;
+  }
+  .other-lines .line-button {
+    border-radius: 20px;
+    font-size: 12px;
+    padding: 6px 12px;
+    min-width: 60px;
+  }
+
+  .search-box {
+    display: flex;
+    position: fixed;           /* ✅ absolute 금지 */
+    left: 15px;
+    right: 15px;
+    top: 260px;                /* 필요하면 dashboard 높이에 맞게 조절 */
+    z-index: 1000001;          /* ✅ dashboard보다 위 */
+    background: #fff;
+    border-radius: 10px;
+    padding: 5px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    pointer-events: auto;
+    transform: none;           /* ✅ stacking 꼬임 방지 */
+  }
+
+  .station-input{
+    flex: 1;
+    min-width: 0;
+    border: none;
+    padding: 10px 15px;
+    font-size: 16px;
+    outline: none;
+  }
 }
-
-.options-wrap{
-  flex: 0 0 auto;
-}
-.search-box{ overflow: visible; }
-
-.ui-btn{
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(0,0,0,0.15);
-  background: #fff;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.ui-btn.danger{
-  background: #ffeded;
-  border-color: rgba(255,0,0,0.2);
-}
-
-.modal-backdrop{
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 99999;
-}
-
-.modal{
-  width: min(420px, 90vw);
-  background: #fff;
-  border-radius: 14px;
-  padding: 14px 14px 12px;
-  box-shadow: 0 12px 40px rgba(0,0,0,0.25);
-}
-
-.modal-title{
-  font-size: 15px;
-  font-weight: 900;
-  margin-bottom: 8px;
-}
-
-.modal-body{
-  font-size: 13px;
-  line-height: 1.35;
-  margin-bottom: 12px;
-}
-
-.modal-actions{
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-#overlayControls{
-  position: fixed;
-  top: 12px;
-  right: 12px;
-  z-index: 100000; /* leaflet보다 크게 */
-  display: flex;
-  gap: 8px;
-}
-    /* ========================================================== */
-    /* 1. PC 기본 스타일 (원본 파일의 스타일 유지) */
-    /* ========================================================== */
-    html, body, #map { height: 100%; margin: 0; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans KR', sans-serif; overflow: hidden; }
-
-    /* PC용 Topbar (지도 상단 중앙 검색창) */
-    .topbar { 
-      position: absolute; z-index: 1001; top: .75rem; left: 50%; transform: translateX(-50%);
-      background: rgba(255,255,255,.95); border-radius: 14px; padding: .5rem .75rem;
-      font: 14px/1.2 system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans KR', sans-serif;
-      display: flex; gap: .5rem; align-items: center; box-shadow: 0 2px 6px rgba(0,0,0,.06); 
-    }
-    .topbar input { border: 1px solid #ccc; border-radius: 10px; padding: .35rem .5rem; font-size: 14px; width: 240px; }
-
-    /* PC용 Sidebar (우측 노선 목록) */
-    .sidebar { 
-      position: absolute; right: 0; top: 0; width: 300px; height: 100%;
-      background: rgba(255,255,255,.98); overflow-y: auto; z-index: 1000;
-      font-family: system-ui, -apple-system, 'Noto Sans KR', sans-serif;
-      padding: .75rem .75rem 1rem; border-left: 1px solid #e5e5e5;
-      box-shadow: -4px 0 8px rgba(0,0,0,.04); 
-    }
-    .sidebar h3 { font-size: 15px; margin: 0 0 .5rem 0; }
-    .line-item { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: .5rem; padding: .25rem .25rem; font-size: 13px; border-radius: 8px; }
-    .line-item:hover { background: rgba(0,0,0,.035); }
-    .line-dot { width: 14px; height: 14px; border-radius: 50%; border: 1px solid #ddd; }
-    .count { font-variant-numeric: tabular-nums; color: #333; }
-    
-    /* 공통 스타일 유지 */
-	.station-icon { 
-    /* (수정) 기본 마커는 흰색으로 통일하고, 테두리(border)를 회색으로 설정 */
-     width: 10px;        /* 마커 크기 축소 */
-     height: 10px;       /* 마커 크기 축소 */
-     border: 1px solid #999; /* 밝은 회색 테두리 */
-     background-color: #fff; /* 배경색은 흰색 */
-     border-radius: 50%; 
-     box-shadow: 0 0 1px rgba(0,0,0,.4); /* 그림자 약하게 */
-	}
-	.label-text {background-color: transparent; border: none; box-shadow: none; font-size: 13px; font-weight: 800; color: #111; text-shadow: 0 0 2px #fff, 0 0 4px #fff; white-space: nowrap;}    
-	.leaflet-tooltip-top.label-text::before,
-	.leaflet-tooltip-bottom.label-text::before,
-	.leaflet-tooltip-left.label-text::before,
-	.leaflet-tooltip-right.label-text::before {
-		border: none !important;
-	}
-	
-	.options-wrap { position: relative; display: inline-block; }
-
-.options-menu{
-  position: absolute;
-  right: 0;
-  top: 44px;
-  min-width: 190px;
-  background: rgba(255,255,255,.98);
-  border: 1px solid #e5e5e5;
-  border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(0,0,0,.12);
-  padding: 8px;
-  z-index: 20000;
-}
-
-.options-item{
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 10px 10px;
-  border-radius: 10px;
-  font-size: 14px;
-  color: #111;
-  user-select: none;
-}
-
-.options-item:hover{ background: rgba(0,0,0,.05); }
-.options-item input{ transform: scale(1.1); }
-
-    /* ========================================================== */
-    /* 2. 모바일 스타일 (Media Query: 화면 너비 768px 이하) */
-    /* ========================================================== */
-    @media (max-width: 768px) {
-      /* PC용 요소 숨김 (또는 위치 변경) */
-      .topbar { display: none !important; } /* PC용 상단 중앙 검색창 숨김 */
-      .sidebar { display: none !important; } /* PC용 우측 노선 목록 숨김 */
-
-      /* 모바일용 상단 대시보드 */
-      .dashboard {
-        position: absolute; top: 0; left: 0; right: 0; z-index: 1001;
-        background: rgba(255,255,255,1); 
-        padding: 10px 10px 5px;
-        box-shadow: 0 3px 6px rgba(0,0,0,.1);
-      }
-      .completion-rate { margin-bottom: 5px; }
-      .rate-number { font-size: 24px; font-weight: 800; color: #333; }
-      .rate-text { font-size: 16px; font-weight: 500; color: #555; margin-left: 5px; }
-
-      /* 모바일 노선 버튼 */
-      .line-buttons {
-        display: flex; flex-direction: column; gap: 5px;
-        max-height: 200px; overflow-y: auto; padding-bottom: 5px;
-      }
-      .line-group {
-        display: flex; flex-wrap: wrap; gap: 8px;
-      }
-      .line-button {
-        border: none; color: white; font-weight: 700; cursor: pointer; text-align: center;
-        transition: opacity 0.2s;
-        box-shadow: 0 1px 3px rgba(0,0,0,.15);
-      }
-      .main-lines .line-button {
-        width: 38px; height: 38px; border-radius: 50%;
-        font-size: 16px; line-height: 38px; padding: 0;
-      }
-      .other-lines .line-button {
-        border-radius: 20px; font-size: 12px; padding: 6px 12px; min-width: 60px;
-      }
-      
-      /* 모바일용 검색창 (대시보드 아래) */
-      .search-box {
-          position: absolute;
-          top: 260px; /* **이 값은 모바일 대시보드의 예상 높이(약 170~200px)에 맞춰 조정** */
-          left: 15px;
-          right: 15px;
-          display: flex; /* Flex로 변경 */
-          background-color: white;
-          border-radius: 10px;
-          padding: 5px;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-          z-index: 10003; 
-      }
-      .station-input {
-          flex: 1; border: none; padding: 10px 15px; font-size: 16px; outline: none;
-      }
-      .options-button {
-          background: none; border: none; font-size: 20px; padding: 0 10px; color: #888; cursor: pointer;
-      }
-    }
-    
-    /* 기본적으로 모바일 UI는 숨김 처리 (PC에서 보이지 않도록) */
-    .dashboard, .search-box {
-        display: none; 
-    }
-    /* 단, 모바일 뷰에서는 보이도록 설정 */
-    @media (max-width: 768px) {
-        .dashboard, .search-box {
-            display: block; /* 모바일에서 다시 보이게 함 */
-        }
-        /* search-box는 flex로 설정해야 내부 요소가 정렬됨 */
-        .search-box {
-            display: flex;
-        }
-    }
-  </style>
+</style>
 </head>
+
 <body>
   <div id="map"></div>
 
@@ -1741,7 +1661,7 @@ bindOptionsMenu("optionsBtn",   "optionsMenu",   "toggleAltNameBtn");
 
 
   </script>
-	<script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+  <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
 <script>eruda.init();</script>
 </body>
 </html>
