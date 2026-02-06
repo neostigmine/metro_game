@@ -321,16 +321,15 @@
   <strong>수도권 지하철</strong>
   <input type="text" id="stationSearchPC" placeholder="역 이름을 입력" />
 
-  <div class="options-wrap">
-    <button class="options-button" id="optionsBtnPC" type="button" aria-label="옵션">⋮</button>
+<div class="options-wrap">
+  <button class="options-button" id="optionsBtn" type="button" aria-label="옵션">⋮</button>
 
-<div class="options-menu" id="optionsMenuPC" hidden>
-  <button class="options-item-btn" id="toggleAltNameBtnPC" type="button">
-    부역명/병기역명 표시
-  </button>
-</div>
-
+  <div class="options-menu" id="optionsMenu" hidden>
+    <button class="options-item-btn" id="toggleAltNameBtn" type="button">
+      부역명/병기역명 표시
+    </button>
   </div>
+</div>
 </div>
   
   <div class="sidebar">
@@ -1685,38 +1684,14 @@ for (const name of connectingLines) {
     window.addEventListener('resize', updateUI);
 
     init();
-	const optionsBtn = document.getElementById("optionsBtn");
-const optionsMenu = document.getElementById("optionsMenu");
 
-function toggleMenu(e){
-  e.preventDefault();
-  e.stopPropagation();
-  optionsMenu.hidden = !optionsMenu.hidden;
-}
 
-if (optionsBtn && optionsMenu) {
-  optionsBtn.addEventListener("touchstart", toggleMenu, { passive: false });
-  optionsBtn.addEventListener("click", toggleMenu);
-}
 
-document.addEventListener("click", () => closeOptionsMenu());
-
-if (optionsMenu) {
-  optionsMenu.addEventListener("click", (e) => e.stopPropagation());
-}
-
-if (toggleAltName) {
-  toggleAltName.addEventListener("change", () => {
-    hideAltName = !!toggleAltName.checked;
-    localStorage.setItem(SETTINGS_KEY, hideAltName ? "1" : "0");
-    refreshAllLabels();
-    closeOptionsMenu();
-  });
-}
 function setMenuText(btn){
   if (!btn) return;
   btn.textContent = hideAltName ? "부역명/병기역명 표시" : "부역명/병기역명 숨기기";
 }
+
 function bindOptionsMenu(btnId, menuId, toggleBtnId) {
   const btn = document.getElementById(btnId);
   const menu = document.getElementById(menuId);
@@ -1727,19 +1702,26 @@ function bindOptionsMenu(btnId, menuId, toggleBtnId) {
 
   const close = () => { menu.hidden = true; };
 
-  btn.addEventListener("click", (e) => {
+  const openOrClose = (e) => {
+    e.preventDefault();
     e.stopPropagation();
     menu.hidden = !menu.hidden;
-  });
+  };
+
+  // ✅ 모바일에서 확실히: touchstart + click 둘 다
+  btn.addEventListener("touchstart", openOrClose, { passive: false });
+  btn.addEventListener("click", openOrClose);
 
   menu.addEventListener("click", (e) => e.stopPropagation());
   document.addEventListener("click", close);
 
-  toggleBtn.addEventListener("click", () => {
+  toggleBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     hideAltName = !hideAltName;
     localStorage.setItem(SETTINGS_KEY, hideAltName ? "1" : "0");
     setMenuText(toggleBtn);
-    refreshAllLabels();  // ✅ F5 없이 즉시 반영
+    refreshAllLabels();     // ✅ 실시간 반영
     close();
   });
 }
