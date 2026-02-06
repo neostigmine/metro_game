@@ -272,94 +272,7 @@ if (/GTX\s*-?\s*A/i.test(n) || /광역급행철도\s*A/i.test(n) || n === "A노�
     function normStationKey(s=""){
       return s.trim().normalize('NFKC').replace(/[\(\)\[\]{}]/g,'').replace(/\s+/g,'').replace(/[·\.‧∙・․]/g,'·').replace(/역$/,'').toLowerCase();
     }
-
-const PROGRESS_KEY = "subway-progress:v1";
-
-function saveProgress() {
-  try {
-    const payload = {
-      savedAt: Date.now(),
-      shown: Array.from(shownStations.keys()), // stationId 문자열들
-      matchedByLine: Object.fromEntries(
-        Object.entries(lineStats).map(([k, v]) => [k, v.matched || 0])
-      ),
-    };
-    localStorage.setItem(PROGRESS_KEY, JSON.stringify(payload));
-    console.log("[progress] saved");
-  } catch (e) {
-    console.warn("[progress] save failed", e?.name, e?.message, e);
-  }
-}
-
-function restoreProgress() {
-  try {
-    const raw = localStorage.getItem(PROGRESS_KEY);
-    if (!raw) { console.log("[progress] none"); return; }
-    const obj = JSON.parse(raw);
-
-    // lineStats matched 복원
-    if (obj.matchedByLine) {
-      for (const [k, m] of Object.entries(obj.matchedByLine)) {
-        if (!lineStats[k]) lineStats[k] = { total: 0, matched: 0, color: colorMap[k] || "#003DA5" };
-        lineStats[k].matched = Number(m) || 0;
-      }
-    }
-
-    // 찍힌 역들(마커/라벨) 복원
-    const ids = Array.isArray(obj.shown) ? obj.shown : [];
-    for (const stationId of ids) {
-      if (shownStations.has(stationId)) continue;
-
-      // stationId 형식: `${st.key}@${lat},${lon}`
-      const m = stationId.match(/^(.+?)@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/);
-      if (!m) continue;
-
-      const key = m[1];
-      const lat = parseFloat(m[2]);
-      const lon = parseFloat(m[3]);
-
-      // 이름 찾기(같은 key 여러 개면 좌표로 가장 가까운 것)
-      const cands = (window.subwayData?.stations || []).filter(s => s.key === key);
-      let best = null, bestD2 = Infinity;
-      for (const s of cands) {
-        const d2 = (s.lat - lat) ** 2 + (s.lon - lon) ** 2;
-        if (d2 < bestD2) { bestD2 = d2; best = s; }
-      }
-      if (!best) continue;
-
-      // 색상 계산(네 기존 로직 재사용)
-      let connectingLines = linesForStationResolved(best);
-      const primaryName = pickClosestLineNameForStation(best, connectingLines);
-      const primaryObj = primaryName ? window.subwayData.lines.find(L => L.name === primaryName) : null;
-      const fallbackNearest = nearestLine(best.lat, best.lon);
-      const markerColor = primaryObj?.color || colorMap[primaryName] || fallbackNearest.color;
-
-      const icon = L.divIcon({
-        className: '',
-        html: `<div class='station-icon' style='background-color:${markerColor}; border: 2px solid #fff; width:14px; height:14px;'></div>`,
-        iconSize: [14, 14],
-        iconAnchor: [7, 7]
-      });
-
-      const marker = L.marker([best.lat, best.lon], { icon, zIndexOffset: 1000 }).addTo(map);
-      L.tooltip({ permanent: true, direction: 'top', className: 'label-text' })
-        .setLatLng([best.lat, best.lon])
-        .setContent(best.name)
-        .addTo(map);
-
-      shownStations.set(stationId, marker);
-    }
-
-    console.log("[progress] restored", ids.length);
-  } catch (e) {
-    console.warn("[progress] restore failed", e?.name, e?.message, e);
-  }
-}
-
-// (선택) 진행 초기화
-window.clearProgress = () => localStorage.removeItem(PROGRESS_KEY);
-
-	  
+	
 	// =====================
 // Overpass 캐시 (IndexedDB)
 // =====================
@@ -417,18 +330,13 @@ async function cacheSet(key, value) {
 }
 
 async function getOverpassWithCache(query, opts = {}) {
-  const { forceNetwork = false, cacheKey = null } = opts;
+  const { forceNetwork = false } = opts;
 
-  // ✅ 쿼리 문자열을 정규화해서 키 안정화 (해시 쓰더라도 안정적)
-  const qNorm = (query || "").toString().normalize("NFKC").replace(/\s+/g, " ").trim();
-
-  const key = cacheKey
-    ? `overpass:${cacheKey}`
-    : `overpass:${fnv1a(qNorm)}`;
-
-  console.log("[Overpass cache] key =", key);
+  const qh = fnv1a(query);
+  const key = `overpass:${qh}`;
 
   if (!forceNetwork) {
+    // 1) 캐시가 있으면 "무조건" 사용 (시간 제한 없음)
     try {
       const hit = await cacheGet(key);
       if (hit && hit.data) {
@@ -437,22 +345,23 @@ async function getOverpassWithCache(query, opts = {}) {
       }
       console.log("[Overpass cache] MISS");
     } catch (e) {
-      console.warn("[Overpass cache] read failed", e?.name, e?.message, e);
+      console.warn("[Overpass cache] read failed -> no-cache mode", e);
     }
   }
 
+  // 2) 네트워크 fetch
   const fresh = await fetchOverpass(query);
 
+  // 3) 저장 (덮어쓰기)
   try {
     await cacheSet(key, { savedAt: Date.now(), data: fresh });
     console.log("[Overpass cache] SAVED");
   } catch (e) {
-    console.warn("[Overpass cache] save failed", e?.name, e?.message, e);
+    console.warn("[Overpass cache] save failed (quota/private mode?)", e);
   }
 
   return { data: fresh, fromCache: false };
 }
-
 
 
 // (선택) 콘솔에서 캐시 삭제: await window.clearOverpassCache()
@@ -866,7 +775,6 @@ const manualStations = [
   { key: normStationKey("초월"), name: "초월", line: "경강선", lat: 37.3736, lon: 127.2995 },
   { key: normStationKey("임학"), name: "임학", line: "인천1호선", lat: 37.5455, lon: 126.7389 },
   { key: normStationKey("박촌"), name: "박촌", line: "인천1호선", lat: 37.5536, lon: 126.7450 },
-  { key: normStationKey("박촌"), name: "박촌", line: "인천1호선", lat: 37.5536, lon: 126.7450 },
   { key: normStationKey("양평"), name: "양평", line: "경의·중앙선", lat: 37.4928, lon: 127.4918 },
   { key: normStationKey("신촌"), name: "신촌", line: "경의·중앙선", lat: 37.5597, lon: 126.9423 },
   { key: normStationKey("부천시청"), name: "부천시청", line: "7호선", lat: 37.5046, lon: 126.7639 },
@@ -1153,8 +1061,8 @@ function excludeStationsEverywhere(names) {
   }
   window.subwayData.lineStops = ls;
 }
-const CACHE_KEY = "v8:" + bbox.join(",");
-const { data: raw, fromCache } = await getOverpassWithCache(overpassQuery, { cacheKey: CACHE_KEY });
+const CACHE_KEY = "overpass:v8:" + bbox.join(","); // bbox 바뀌면 키도 바뀜
+const { data: raw } = await getOverpassWithCache(overpassQuery);
 window.rawOverpass = raw;
 console.log("elements:", raw.elements.length);
 
@@ -1190,8 +1098,6 @@ drawLines(subwayData.lines);
 computeTotals();
 drawBaseMarkers(subwayData.stations);
 updateUI();
-restoreProgress();
-updateUI();		  
 
 // bounds도 동일하게
 const bounds = L.latLngBounds([]);
@@ -1252,6 +1158,163 @@ function linesForStationResolved(st) {
   return one ? [one] : [];
 }
 
+window.MANUAL_ALIAS = new Map([
+//1호선
+  [normStationKey("나사렛대"), normStationKey("쌍용")],
+  [normStationKey("서울시립대입구"), normStationKey("청량리")],
+  [normStationKey("한국건강관리협회"), normStationKey("제기동")],
+  [normStationKey("삼양그룹"), normStationKey("종로5가")],
+  [normStationKey("순천향대"), normStationKey("신창")],
+  [normStationKey("아산현충사"), normStationKey("온양온천")],
+//2호선/
+  [normStationKey("하나은행"), normStationKey("을지로입구")],
+  [normStationKey("신한카드"), normStationKey("을지로3가")],
+  [normStationKey("케이뱅크"), normStationKey("을지로4가")],
+  [normStationKey("DDP"), normStationKey("동대문역사문화공원")],
+  [normStationKey("성동구청"), normStationKey("왕십리")],
+  [normStationKey("무신사"), normStationKey("성수")],
+  [normStationKey("광진구청"), normStationKey("구의")],
+  [normStationKey("동서울터미널"), normStationKey("강변")],
+  [normStationKey("수협중앙회공제보험"), normStationKey("잠실나루")],
+  [normStationKey("송파구청"), normStationKey("잠실")],
+  [normStationKey("무역센터"), normStationKey("삼성")],
+  [normStationKey("애큐온저축은행"), normStationKey("선릉")],
+  [normStationKey("센터필드"), normStationKey("역삼")],
+  [normStationKey("하루플란트치과"), normStationKey("강남")],
+  [normStationKey("법원.검찰청"), normStationKey("교대")],
+  [normStationKey("백석예술대"), normStationKey("방배")],
+  [normStationKey("강감찬"), normStationKey("낙성대")],
+  [normStationKey("관악구청"), normStationKey("서울대입구")],
+  [normStationKey("원광디지털대"), normStationKey("구로디지털단지")],
+  [normStationKey("구로구청"), normStationKey("대림")],
+  [normStationKey("김안과병원"), normStationKey("문래")],
+  [normStationKey("세아타워"), normStationKey("합정")],
+  [normStationKey("경기대입구"), normStationKey("충정로")],
+  [normStationKey("동대문구청"), normStationKey("용두")],
+//3호선/
+  [normStationKey("은평성모병원"), normStationKey("구파발")],
+  [normStationKey("정부서울청사"), normStationKey("경복궁")],
+  [normStationKey("감리교신학대학교"), normStationKey("독립문")],
+  [normStationKey("현대건설"), normStationKey("안국")],
+  [normStationKey("현대백화점"), normStationKey("압구정")],
+  [normStationKey("KCC건설"), normStationKey("신사")],
+  [normStationKey("예술의전당"), normStationKey("남부터미널")],
+  [normStationKey("서초구청"), normStationKey("양재")],
+  [normStationKey("서울주택도시개발공사"), normStationKey("대청")],
+ //4호선/
+  [normStationKey("강북구청"), normStationKey("수유")],
+  [normStationKey("서울사이버대학"), normStationKey("미아")],
+  [normStationKey("돈암"), normStationKey("성신여대입구")],
+  [normStationKey("삼선교"), normStationKey("한성대입구")],
+  [normStationKey("우리금융타운"), normStationKey("명동")],
+  [normStationKey("남대문시장"), normStationKey("회현")],
+  [normStationKey("갈월"), normStationKey("숙대입구")],
+  [normStationKey("전쟁기념관"), normStationKey("삼각지")],
+  [normStationKey("아모레퍼시픽"), normStationKey("신용산")],
+  [normStationKey("국립중앙박물관"), normStationKey("이촌")],
+  [normStationKey("현충원"), normStationKey("동작")],
+  [normStationKey("총신대입구"), normStationKey("이수")],
+//5호선/
+  [normStationKey("홈앤쇼핑"), normStationKey("마곡")],
+  [normStationKey("에스앤유서울병원"), normStationKey("발산")],
+  [normStationKey("은행정"), normStationKey("신정")],
+  [normStationKey("목동운동장"), normStationKey("오목교")],
+  [normStationKey("신한투자증권"), normStationKey("여의도")],
+  [normStationKey("유진투자증권"), normStationKey("여의나루")],
+  [normStationKey("강북삼성병원"), normStationKey("서대문")],
+  [normStationKey("세종문화회관"), normStationKey("광화문")],
+  [normStationKey("탑골공원"), normStationKey("종로3가")],
+  [normStationKey("능동"), normStationKey("군자")],
+  [normStationKey("어린이대공원후문"), normStationKey("아차산")],
+  [normStationKey("장신대"), normStationKey("광나루")],
+  [normStationKey("풍납토성"), normStationKey("천호")],
+  [normStationKey("강동성심병원"), normStationKey("강동")],
+  [normStationKey("강동구민회관"), normStationKey("굽은다리")],
+  [normStationKey("강동경희대병원"), normStationKey("고덕")],
+  [normStationKey("덕풍.신장"), normStationKey("하남시청")],
+  [normStationKey("한국체대"), normStationKey("올림픽공원")],
+ //6호선/
+  [normStationKey("신사"), normStationKey("새절")],
+  [normStationKey("명지대"), normStationKey("증산")],
+  [normStationKey("성산"), normStationKey("월드컵경기장")],
+  [normStationKey("서강"), normStationKey("광흥창")],
+  [normStationKey("서강대앞"), normStationKey("대흥")],
+  [normStationKey("용산구청"), normStationKey("녹사평")],
+  [normStationKey("고대병원"), normStationKey("안암")],
+  [normStationKey("종암"), normStationKey("고려대")],
+  [normStationKey("동덕여대"), normStationKey("월곡")], //동덕여대 학우 동지들과 연대합니다 투쟁!
+  [normStationKey("한국과학기술연구원"), normStationKey("상월곡")],
+  [normStationKey("서울여대입구"), normStationKey("화랑대")],
+  [normStationKey("서울의료원"), normStationKey("봉화산")],
+//7호선/
+  [normStationKey("한국성서대"), normStationKey("중계")],
+  [normStationKey("을지대을지병원"), normStationKey("하계")],
+  [normStationKey("서울과학기술대"), normStationKey("공릉")],
+  [normStationKey("한국열린사이버대"), normStationKey("상봉")],
+  [normStationKey("서일대입구"), normStationKey("면목")],
+  [normStationKey("녹색병원"), normStationKey("사가정")],
+  [normStationKey("용마폭포공원"), normStationKey("용마산")],
+  [normStationKey("세종대"), normStationKey("어린이대공원")],
+  [normStationKey("뚝섬한강공원"), normStationKey("자양")],
+  [normStationKey("제일정형외과병원"), normStationKey("청담")],
+  [normStationKey("나누리병원"), normStationKey("학동")],
+  [normStationKey("유중아트센터"), normStationKey("내방")],
+  [normStationKey("살피재"), normStationKey("숭실대입구")],
+  [normStationKey("현대에이치티"), normStationKey("보라매")],
+  [normStationKey("구로구청"), normStationKey("대림")],
+  [normStationKey("마리오아울렛"), normStationKey("가산디지털단지")],
+  [normStationKey("성공회대입구"), normStationKey("온수")],
+  [normStationKey("부천아트센터"), normStationKey("부천시청")],
+  [normStationKey("거북시장"), normStationKey("석남")],
+//8호선/
+  [normStationKey("구리전통시장"), normStationKey("구리")],
+  [normStationKey("평화의문"), normStationKey("몽촌토성")],
+  [normStationKey("한솔병원"), normStationKey("석촌")],
+  [normStationKey("성남법원.검찰청"), normStationKey("남한산성입구")],
+  [normStationKey("신구대학교"), normStationKey("단대오거리")],
+//9호선/
+  [normStationKey("서울식물원"), normStationKey("마곡나루")],
+  [normStationKey("부민병원"), normStationKey("가양")],
+  [normStationKey("서울고든병원"), normStationKey("증미")],
+  [normStationKey("강서대학교"), normStationKey("등촌")],
+  [normStationKey("한국산업은행"), normStationKey("국회의사당")],
+  [normStationKey("KB금융타운"), normStationKey("샛강")],
+  [normStationKey("중앙대입구"), normStationKey("흑석")],
+//인천 1호선, 2호선
+  [normStationKey("북부법원.검찰청"), normStationKey("아라")],
+  [normStationKey("재외동포청"), normStationKey("센트럴파크")],
+  [normStationKey("검단산업단지"), normStationKey("검단오류")],
+  [normStationKey("공촌사거리"), normStationKey("아시아드경기장")],
+  [normStationKey("인천J밸리"), normStationKey("주안국가산단")],
+  [normStationKey("문화창작지대"), normStationKey("시민공원")],
+  [normStationKey("서창"), normStationKey("운연")],
+//신분당선/
+  [normStationKey("매헌"), normStationKey("양재시민의숲")],
+  [normStationKey("판교테크노밸리"), normStationKey("판교")],
+  [normStationKey("분당서울대병원"), normStationKey("미금")],
+  [normStationKey("아주대"), normStationKey("광교중앙")],
+  [normStationKey("경기대"), normStationKey("광교")],
+//용인경전철
+  [normStationKey("백남준아트센터"), normStationKey("기흥")],
+  [normStationKey("용인미르스타디움"), normStationKey("삼가")],
+  [normStationKey("용인예술과학대"), normStationKey("용인중앙시장")],
+//우이신설선
+  [normStationKey("도선사입구"), normStationKey("북한산우이")],
+  [normStationKey("덕성여대"), normStationKey("4.19민주묘지")],
+  [normStationKey("서경대"), normStationKey("북한산보국문")],
+  [normStationKey("국민대"), normStationKey("정릉")],
+//신림선, 김포골드라인
+  [normStationKey("성애병원"), normStationKey("대방")],
+  [normStationKey("전문건설회관"), normStationKey("보라매병원")],
+  [normStationKey("서울대"), normStationKey("관악산")],
+  [normStationKey("김포시청"), normStationKey("사우")],
+]);
+
+function applyManualAlias(userText) {
+  const k = normStationKey((userText || "").replace(/\./g,'·'));
+  return window.MANUAL_ALIAS.get(k) || k;
+}
+
 const searchHandler = (e, inputElement) => {
   if (e.key !== 'Enter') return;
 
@@ -1261,11 +1324,23 @@ const searchHandler = (e, inputElement) => {
     return;
   }
 
-  const input = (inputElement.value || "").replace(/\./g,'·');
-  const key = normStationKey(input);
-  if (!key) return;
+const userTextRaw = (inputElement.value || "").trim();
+const userKey = normStationKey(userTextRaw.replace(/\./g,'·')); // 사용자가 친 걸 정규화
+const key = applyManualAlias(userTextRaw);                      // 대표역 key로 resolve
+if (!key) return;
 
-  const foundList = data.stations.filter(s => s.key === key);
+function buildReverseAliasMap(aliasMap) {
+  const rev = new Map(); // canonicalKey -> Set(aliasText)
+  for (const [aliasKey, canonicalKey] of aliasMap.entries()) {
+    if (!rev.has(canonicalKey)) rev.set(canonicalKey, new Set());
+    // aliasKey는 정규화 key라 예쁘게 보이진 않으니, "표시용 문자열"을 따로 넣고 싶으면 아래 방법 2가 더 좋음
+    rev.get(canonicalKey).add(aliasKey);
+  }
+  return rev;
+}
+
+
+const foundList = data.stations.filter(s => normStationKey(s.key || s.name || "") === key);
   if (foundList.length === 0) {
     alert("정확히 일치하는 역명을 찾을 수 없습니다.");
     return;
@@ -1282,6 +1357,13 @@ const searchHandler = (e, inputElement) => {
   if (targets.length === 0) return;
 
   for (const st of targets) {
+  // ✅ 사용자가 별칭으로 입력한 경우에만 병기 표기
+  const REVERSE_ALIAS = buildReverseAliasMap(window.MANUAL_ALIAS);
+
+const aliases = REVERSE_ALIAS.get(st.key);
+const oneAliasKey = aliases ? [...aliases][0] : "";
+const label = oneAliasKey ? `${st.name}(${oneAliasKey})` : st.name;
+
 const stationId = `${st.key}@${st.lat.toFixed(6)},${st.lon.toFixed(6)}`;
 if (shownStations.has(stationId)) continue;	
 
@@ -1307,7 +1389,7 @@ const icon = L.divIcon({
     const marker = L.marker([st.lat, st.lon], { icon, zIndexOffset: 1000 }).addTo(map);
     L.tooltip({ permanent: true, direction: 'top', className: 'label-text' })
       .setLatLng([st.lat, st.lon])
-      .setContent(st.name)
+.setContent(label)
       .addTo(map);
 
     shownStations.set(stationId, marker);
@@ -1335,7 +1417,7 @@ for (const name of connectingLines) {
   }
 
   updateUI();
-saveProgress();
+
   inputElement.value = '';
   map.panTo([targets[0].lat, targets[0].lon]);
 };
