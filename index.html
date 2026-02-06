@@ -272,7 +272,94 @@ if (/GTX\s*-?\s*A/i.test(n) || /광역급행철도\s*A/i.test(n) || n === "A노�
     function normStationKey(s=""){
       return s.trim().normalize('NFKC').replace(/[\(\)\[\]{}]/g,'').replace(/\s+/g,'').replace(/[·\.‧∙・․]/g,'·').replace(/역$/,'').toLowerCase();
     }
-	
+
+const PROGRESS_KEY = "subway-progress:v1";
+
+function saveProgress() {
+  try {
+    const payload = {
+      savedAt: Date.now(),
+      shown: Array.from(shownStations.keys()), // stationId 문자열들
+      matchedByLine: Object.fromEntries(
+        Object.entries(lineStats).map(([k, v]) => [k, v.matched || 0])
+      ),
+    };
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify(payload));
+    console.log("[progress] saved");
+  } catch (e) {
+    console.warn("[progress] save failed", e?.name, e?.message, e);
+  }
+}
+
+function restoreProgress() {
+  try {
+    const raw = localStorage.getItem(PROGRESS_KEY);
+    if (!raw) { console.log("[progress] none"); return; }
+    const obj = JSON.parse(raw);
+
+    // lineStats matched 복원
+    if (obj.matchedByLine) {
+      for (const [k, m] of Object.entries(obj.matchedByLine)) {
+        if (!lineStats[k]) lineStats[k] = { total: 0, matched: 0, color: colorMap[k] || "#003DA5" };
+        lineStats[k].matched = Number(m) || 0;
+      }
+    }
+
+    // 찍힌 역들(마커/라벨) 복원
+    const ids = Array.isArray(obj.shown) ? obj.shown : [];
+    for (const stationId of ids) {
+      if (shownStations.has(stationId)) continue;
+
+      // stationId 형식: `${st.key}@${lat},${lon}`
+      const m = stationId.match(/^(.+?)@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/);
+      if (!m) continue;
+
+      const key = m[1];
+      const lat = parseFloat(m[2]);
+      const lon = parseFloat(m[3]);
+
+      // 이름 찾기(같은 key 여러 개면 좌표로 가장 가까운 것)
+      const cands = (window.subwayData?.stations || []).filter(s => s.key === key);
+      let best = null, bestD2 = Infinity;
+      for (const s of cands) {
+        const d2 = (s.lat - lat) ** 2 + (s.lon - lon) ** 2;
+        if (d2 < bestD2) { bestD2 = d2; best = s; }
+      }
+      if (!best) continue;
+
+      // 색상 계산(네 기존 로직 재사용)
+      let connectingLines = linesForStationResolved(best);
+      const primaryName = pickClosestLineNameForStation(best, connectingLines);
+      const primaryObj = primaryName ? window.subwayData.lines.find(L => L.name === primaryName) : null;
+      const fallbackNearest = nearestLine(best.lat, best.lon);
+      const markerColor = primaryObj?.color || colorMap[primaryName] || fallbackNearest.color;
+
+      const icon = L.divIcon({
+        className: '',
+        html: `<div class='station-icon' style='background-color:${markerColor}; border: 2px solid #fff; width:14px; height:14px;'></div>`,
+        iconSize: [14, 14],
+        iconAnchor: [7, 7]
+      });
+
+      const marker = L.marker([best.lat, best.lon], { icon, zIndexOffset: 1000 }).addTo(map);
+      L.tooltip({ permanent: true, direction: 'top', className: 'label-text' })
+        .setLatLng([best.lat, best.lon])
+        .setContent(best.name)
+        .addTo(map);
+
+      shownStations.set(stationId, marker);
+    }
+
+    console.log("[progress] restored", ids.length);
+  } catch (e) {
+    console.warn("[progress] restore failed", e?.name, e?.message, e);
+  }
+}
+
+// (선택) 진행 초기화
+window.clearProgress = () => localStorage.removeItem(PROGRESS_KEY);
+
+	  
 	// =====================
 // Overpass 캐시 (IndexedDB)
 // =====================
@@ -1103,6 +1190,8 @@ drawLines(subwayData.lines);
 computeTotals();
 drawBaseMarkers(subwayData.stations);
 updateUI();
+restoreProgress();
+updateUI();		  
 
 // bounds도 동일하게
 const bounds = L.latLngBounds([]);
@@ -1246,7 +1335,7 @@ for (const name of connectingLines) {
   }
 
   updateUI();
-
+saveProgress();
   inputElement.value = '';
   map.panTo([targets[0].lat, targets[0].lon]);
 };
