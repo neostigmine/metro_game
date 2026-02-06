@@ -6,7 +6,27 @@
   <title>수도권 지하철 역명 맞추기</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
-	  /* ✅ Leaflet 캔버스가 터치/클릭을 가로채지 않게 */
+  /* ✅ 지도 위 UI는 클릭 가능해야 함 */
+.search-container,
+.search-box,
+.options-wrap,
+#optionsBtn {
+  pointer-events: auto !important;
+}
+
+/* ✅ 지도 레이어보다 위로 */
+.search-container, .search-box {
+  position: relative;
+  z-index: 50000;
+}
+
+/* ✅ 버튼 자체도 확실히 */
+#optionsBtn {
+  position: relative;
+  z-index: 50001;
+  touch-action: manipulation; /* 모바일 탭 반응 개선 */
+}
+  /* ✅ Leaflet 캔버스가 터치/클릭을 가로채지 않게 */
 .leaflet-overlay-pane canvas.leaflet-zoom-animated,
 .leaflet-map-pane canvas.leaflet-zoom-animated{
   pointer-events: none !important;
@@ -1667,19 +1687,16 @@ for (const name of connectingLines) {
     init();
 	const optionsBtn = document.getElementById("optionsBtn");
 const optionsMenu = document.getElementById("optionsMenu");
-const toggleAltName = document.getElementById("toggleAltName");
 
-if (toggleAltName) toggleAltName.checked = hideAltName;
-
-function closeOptionsMenu(){
-  if (optionsMenu) optionsMenu.hidden = true;
+function toggleMenu(e){
+  e.preventDefault();
+  e.stopPropagation();
+  optionsMenu.hidden = !optionsMenu.hidden;
 }
 
 if (optionsBtn && optionsMenu) {
-  optionsBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    optionsMenu.hidden = !optionsMenu.hidden;
-  });
+  optionsBtn.addEventListener("touchstart", toggleMenu, { passive: false });
+  optionsBtn.addEventListener("click", toggleMenu);
 }
 
 document.addEventListener("click", () => closeOptionsMenu());
