@@ -241,12 +241,45 @@ body {
     outline: none;
   }
 }
+	  /* ===== Leaflet 위에 UI를 확정으로 올리는 오버레이 레이어 ===== */
+#uiOverlay{
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;      /* 사실상 최댓값 */
+  pointer-events: none;     /* 기본은 터치 통과 */
+}
+
+/* 오버레이 안의 실제 UI는 터치 가능 */
+#uiOverlay .topbar,
+#uiOverlay .sidebar,
+#uiOverlay .dashboard,
+#uiOverlay .search-box{
+  pointer-events: auto;
+}
+
+/* 모바일 배치 유지 (너 기존 위치값을 여기서 관리) */
+@media (max-width: 768px){
+  #uiOverlay .dashboard{
+    position: fixed;
+    top: 0; left: 0; right: 0;
+  }
+  #uiOverlay .search-box{
+    position: fixed;
+    left: 15px;
+    right: 15px;
+    top: 260px;           /* 필요하면 조절 */
+  }
+}
+
+/* 혹시 map이 위로 올라오면 강제로 바닥 */
+#map{ position: relative; z-index: 0 !important; }
+
 </style>
 </head>
 
 <body>
   <div id="map"></div>
-
+<div id="uiOverlay">
 <div class="topbar">
   <strong>수도권 지하철</strong>
   <input type="text" id="stationSearchPC" placeholder="역 이름을 입력" />
@@ -274,6 +307,7 @@ body {
     </div>
     <div class="line-buttons" id="lineButtons">
         </div>
+  </div>
   </div>
 
 <div class="search-box">
