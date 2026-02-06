@@ -6,6 +6,16 @@
   <title>수도권 지하철 역명 맞추기</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
+	  /* ✅ 대시보드의 "빈 영역"은 터치 먹지 말고 통과 */
+.dashboard, .Dashboard {
+  pointer-events: none !important;
+}
+
+/* ✅ 대신 대시보드 안의 실제 버튼/입력은 다시 클릭 가능 */
+.dashboard button, .dashboard input, .dashboard a,
+.Dashboard button, .Dashboard input, .Dashboard a {
+  pointer-events: auto !important;
+}
   /* ✅ 지도 위 UI는 클릭 가능해야 함 */
 .search-container,
 .search-box,
