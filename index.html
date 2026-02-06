@@ -6,6 +6,11 @@
   <title>수도권 지하철 역명 맞추기</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
+	  /* ✅ Leaflet 캔버스가 터치/클릭을 가로채지 않게 */
+.leaflet-overlay-pane canvas.leaflet-zoom-animated,
+.leaflet-map-pane canvas.leaflet-zoom-animated{
+  pointer-events: none !important;
+}
   #optionsBtn,
 .options-button{
   display: inline-flex !important;
