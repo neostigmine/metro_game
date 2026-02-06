@@ -330,13 +330,18 @@ async function cacheSet(key, value) {
 }
 
 async function getOverpassWithCache(query, opts = {}) {
-  const { forceNetwork = false } = opts;
+  const { forceNetwork = false, cacheKey = null } = opts;
 
-  const qh = fnv1a(query);
-  const key = `overpass:${qh}`;
+  // ✅ 쿼리 문자열을 정규화해서 키 안정화 (해시 쓰더라도 안정적)
+  const qNorm = (query || "").toString().normalize("NFKC").replace(/\s+/g, " ").trim();
+
+  const key = cacheKey
+    ? `overpass:${cacheKey}`
+    : `overpass:${fnv1a(qNorm)}`;
+
+  console.log("[Overpass cache] key =", key);
 
   if (!forceNetwork) {
-    // 1) 캐시가 있으면 "무조건" 사용 (시간 제한 없음)
     try {
       const hit = await cacheGet(key);
       if (hit && hit.data) {
@@ -345,23 +350,22 @@ async function getOverpassWithCache(query, opts = {}) {
       }
       console.log("[Overpass cache] MISS");
     } catch (e) {
-      console.warn("[Overpass cache] read failed -> no-cache mode", e);
+      console.warn("[Overpass cache] read failed", e?.name, e?.message, e);
     }
   }
 
-  // 2) 네트워크 fetch
   const fresh = await fetchOverpass(query);
 
-  // 3) 저장 (덮어쓰기)
   try {
     await cacheSet(key, { savedAt: Date.now(), data: fresh });
     console.log("[Overpass cache] SAVED");
   } catch (e) {
-    console.warn("[Overpass cache] save failed (quota/private mode?)", e);
+    console.warn("[Overpass cache] save failed", e?.name, e?.message, e);
   }
 
   return { data: fresh, fromCache: false };
 }
+
 
 
 // (선택) 콘솔에서 캐시 삭제: await window.clearOverpassCache()
@@ -1062,8 +1066,8 @@ function excludeStationsEverywhere(names) {
   }
   window.subwayData.lineStops = ls;
 }
-const CACHE_KEY = "overpass:v8:" + bbox.join(","); // bbox 바뀌면 키도 바뀜
-const { data: raw } = await getOverpassWithCache(overpassQuery);
+const CACHE_KEY = "v8:" + bbox.join(",");
+const { data: raw, fromCache } = await getOverpassWithCache(overpassQuery, { cacheKey: CACHE_KEY });
 window.rawOverpass = raw;
 console.log("elements:", raw.elements.length);
 
