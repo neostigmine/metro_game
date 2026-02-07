@@ -396,7 +396,25 @@ if (/GTX\s*-?\s*A/i.test(n) || /광역급행철도\s*A/i.test(n) || n === "A노�
     }
     function normStationKey(s=""){
       return s.trim().normalize('NFKC').replace(/[\(\)\[\]{}]/g,'').replace(/\s+/g,'').replace(/[·\.‧∙・․]/g,'·').replace(/역$/,'').toLowerCase();
-    }
+ // 2) 별칭(병기명/부역명) -> 표준 역명 매핑
+  const ALIAS = {
+    "남부터미널예술의전당": "남부터미널",
+	  "구성gtx": "구성",
+  "구성 gtx": "구성", 
+    // 필요하면 계속 추가
+  };
+
+  return (ALIAS[k] ?? k);
+
+
+  // 3) 매핑된 값도 같은 규칙으로 정규화해서 반환
+  return String(mapped).trim().normalize('NFKC')
+    .replace(/[\(\)\[\]{}]/g,'')
+    .replace(/\s+/g,'')
+    .replace(/[·\.‧∙・․]/g,'·')
+    .replace(/역$/,'')
+    .toLowerCase();
+}
 	
 	// =====================
 // Overpass 캐시 (IndexedDB)
@@ -621,14 +639,17 @@ function addStopPointsByNearestStation(lineStops, lineStopPoints, stations) {
 
 
 
-function addManualLineStops(lineStops, lineName, stationNames) {
+function addManualLineStops(lineStops, rawLineName, stationNames) {
+  const lineName = toCanonicalLine(rawLineName) || rawLineName; // ✅ 노선 키 통일
   if (!lineStops.has(lineName)) lineStops.set(lineName, new Set());
   const set = lineStops.get(lineName);
 
-  for (const nm of stationNames) {
-    set.add(normStationKey(nm));
+  for (const n of stationNames) {
+    const k = normStationKey(n);
+    if (k) set.add(k); // ✅ 덮어쓰기 X, 계속 추가
   }
 }
+
 function parseData(data) {
   const elements = data.elements || [];
 
@@ -904,6 +925,7 @@ const manualStations = [
   { key: normStationKey("신촌"), name: "신촌", line: "경의·중앙선", lat: 37.5597, lon: 126.9423 },
   { key: normStationKey("부천시청"), name: "부천시청", line: "7호선", lat: 37.5046, lon: 126.7639 },
 
+
 ];
 
 const dedup2 = mergeManualStations(dedup, manualStations);
@@ -924,7 +946,7 @@ console.log("DUP STATIONS:", dups.map(([k, arr]) => ({
   pts: arr.map(x => [x.lat, x.lon])
 })));
 addManualLineStops(lineStops, "GTX-A", [
-  "운정중앙","킨텍스","대곡","연신내","서울","삼성"
+  "운정중앙","킨텍스","대곡","연신내", "서울", "수서", "구성", "성남", "동탄",
 ]);
 const lineStopsObj = Object.fromEntries(
   [...lineStops.entries()].map(([k, v]) => [k, [...v]])
@@ -1070,7 +1092,7 @@ totalStationsCount = uniq.size;
       });
     }
     
-	const MAX_DISTANCE_SQ = 0.000002; // 0.002 * 0.002 = 0.000004 (경위도 제곱 거리)
+	const MAX_DISTANCE_SQ = 0.000004; // 0.002 * 0.002 = 0.000004 (경위도 제곱 거리)
 
     function getNearbyLines(lat, lon) {
         const nearbyLines = new Set();
@@ -1154,7 +1176,49 @@ function nearbyLinesForStation(station){
     function updateUI(){
 
         // 화면 너비에 따라 다른 UI 업데이트 함수 호출
+		
         if (window.innerWidth <= 768) {
+		// ✅ lineStops 기반으로 lineStats 재계산 (GTX-A 같은 수동 노선 포함)
+lineStats = lineStats || {};
+
+const d = window.subwayData;
+if (d?.lineStops) {
+  totalStationsCount = 0;
+
+  for (const [lineName, stops] of Object.entries(d.lineStops)) {
+    const total = Array.isArray(stops) ? stops.length : 0;
+
+    // 기존 색상 유지(있으면), 없으면 기본
+    const prev = lineStats[lineName] || {};
+    const color = prev.color || "#777";
+
+    // 발견 수 계산: 너 프로젝트에서 "발견됨" 판정이 뭔지 모르니
+    // 기존 prev.matched가 있으면 유지하고, 없으면 0으로 둠
+    // (발견 로직이 따로 있으면 그 로직으로 matched를 채우는 게 정답)
+    const matched = prev.matched ?? 0;
+
+    lineStats[lineName] = { total, matched, color };
+    totalStationsCount += total;
+  }
+}
+
+
+function syncLineStatsFromLineStops(){
+  const d = window.subwayData;
+  if (!d?.lineStops) return;
+
+  window.lineStats = window.lineStats || {};
+  const lineStats = window.lineStats;
+
+  for (const [lineName, stops] of Object.entries(d.lineStops)) {
+    const total = Array.isArray(stops) ? stops.length : 0;
+    lineStats[lineName] = lineStats[lineName] || { total: 0, matched: 0, color: "#777" };
+    lineStats[lineName].total = total;     // ✅ 총역수 채우기
+    // matched는 너 진행상황 계산 로직이 따로 있을 테니 여기선 건드리지 않음
+  }
+}
+syncLineStatsFromLineStops();
+
             updateDashboard();
         } else {
             updateSidebar();
