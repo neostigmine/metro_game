@@ -1236,8 +1236,19 @@ function linesForStationKey(stKey) {
   }
   return out;
 }
+async function tryPersistStorage() {
+  if (!navigator.storage || !navigator.storage.persist) return;
+  const persisted = await navigator.storage.persisted();
+  if (!persisted) {
+    const ok = await navigator.storage.persist();
+    console.log("[storage] persist request:", ok);
+  } else {
+    console.log("[storage] already persisted");
+  }
+}
 
     async function init(){
+	await tryPersistStorage();
       try{
 	  // ✅ 노선도/검색 결과에서 완전히 제외할 역들 (월미바다열차)
 function excludeStationsEverywhere(names) {
@@ -1738,17 +1749,7 @@ for (const name of connectingLines) {
     
     // 화면 크기 변경 시 UI 업데이트 (PC-모바일 전환 시)
     window.addEventListener('resize', updateUI);
-async function tryPersistStorage() {
-  if (!navigator.storage || !navigator.storage.persist) return;
-  const persisted = await navigator.storage.persisted();
-  if (!persisted) {
-    const ok = await navigator.storage.persist();
-    console.log("[storage] persist request:", ok);
-  } else {
-    console.log("[storage] already persisted");
-  }
-}
-await tryPersistStorage();
+
     init();
 
 
