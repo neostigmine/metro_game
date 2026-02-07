@@ -1016,7 +1016,6 @@ let hideAltName = (localStorage.getItem(SETTINGS_KEY) === "1");
     let totalStationsCount = 0;
     let matchedStationsCount = 0;
 window.lineStats = window.lineStats || {};
-const lineStats = window.lineStats;
     function drawLines(lines){
       lines.forEach(Ln=>{
         lineStats[Ln.name]=lineStats[Ln.name]||{total:0,matched:0,color:Ln.color};
