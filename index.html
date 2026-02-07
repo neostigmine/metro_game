@@ -394,27 +394,34 @@ if (/GTX\s*-?\s*A/i.test(n) || /광역급행철도\s*A/i.test(n) || n === "A노�
 
       return "";
     }
-    function normStationKey(s=""){
-      return s.trim().normalize('NFKC').replace(/[\(\)\[\]{}]/g,'').replace(/\s+/g,'').replace(/[·\.‧∙・․]/g,'·').replace(/역$/,'').toLowerCase();
- // 2) 별칭(병기명/부역명) -> 표준 역명 매핑
-  const ALIAS = {
-    "남부터미널예술의전당": "남부터미널",
-	  "구성gtx": "구성",
-  "구성 gtx": "구성", 
-    // 필요하면 계속 추가
-  };
+// 2) 별칭(병기명/부역명) -> 표준 역명 매핑 (함수 밖에!)
+const ALIAS = {
+  "남부터미널예술의전당": "남부터미널",
+  "구성gtx": "구성",
+  // 공백은 norm에서 제거되므로 "구성 gtx"는 사실상 불필요
+};
 
-  return (ALIAS[k] ?? k);
+function normStationKey(s = "") {
+  // 1) 기본 정규화
+  const k = String(s).trim().normalize("NFKC")
+    .replace(/[\(\)\[\]{}]/g, "")
+    .replace(/\s+/g, "")
+    .replace(/[·\.‧∙・․]/g, "·")
+    .replace(/역$/, "")
+    .toLowerCase();
 
+  // 2) 별칭 적용
+  const mapped = ALIAS[k] ?? k;
 
-  // 3) 매핑된 값도 같은 규칙으로 정규화해서 반환
-  return String(mapped).trim().normalize('NFKC')
-    .replace(/[\(\)\[\]{}]/g,'')
-    .replace(/\s+/g,'')
-    .replace(/[·\.‧∙・․]/g,'·')
-    .replace(/역$/,'')
+  // 3) 별칭 결과도 동일 규칙으로 정규화해서 반환(안전)
+  return String(mapped).trim().normalize("NFKC")
+    .replace(/[\(\)\[\]{}]/g, "")
+    .replace(/\s+/g, "")
+    .replace(/[·\.‧∙・․]/g, "·")
+    .replace(/역$/, "")
     .toLowerCase();
 }
+
 	
 	// =====================
 // Overpass 캐시 (IndexedDB)
@@ -471,48 +478,42 @@ async function cacheSet(key, value) {
     tx.oncomplete = () => db.close();
   });
 }
+async function getOverpassWithCache(overpassQuery) {
+  const key = `overpass:v8:${fnv1a(overpassQuery)}`; // 네 방식 그대로
 
-async function getOverpassWithCache(query, opts = {}) {
-  const { forceNetwork = false } = opts;
-
-  const qh = fnv1a(query);
-  const key = `overpass:${qh}`;
-
-  if (!forceNetwork) {
-    // 1) 캐시가 있으면 "무조건" 사용 (시간 제한 없음)
-    try {
-await cacheSet(key, { savedAt: Date.now(), data: JSON.stringify(fresh) });
-
-// 읽을 때
-const hit = await cacheGet(key);
-if (hit && hit.data) {
-  const obj = (typeof hit.data === "string") ? JSON.parse(hit.data) : hit.data;
-  return { data: obj, fromCache: true };
-}
-      console.log("[Overpass cache] MISS");
-    } catch (e) {
-      console.warn("[Overpass cache] read failed -> no-cache mode", e);
+  // A) 캐시 읽기: 실패해도 경고만
+  try {
+    const hit = await cacheGet(key);
+    if (hit && hit.data) {
+      const obj = (typeof hit.data === "string") ? JSON.parse(hit.data) : hit.data;
+      console.log("[Overpass cache] Hit", key);
+      return { data: obj, fromCache: true };
     }
+    console.log("[Overpass cache] Miss", key);
+  } catch (e) {
+    console.warn("[Overpass cache] read failed -> no-cache mode", e);
   }
 
-  // 2) 네트워크 fetch
- let fresh = null;
+  // B) fetch: fresh는 여기서만 채운다 (선언을 먼저!)
+  let fresh = null;
   try {
-    fresh = await fetchOverpass(query); // 네가 쓰는 실제 fetch 함수명으로
+    fresh = await fetchOverpassCached(overpassQuery); // 네 fetch 함수명으로
   } catch (e) {
     console.error("[Overpass] fetch failed", e);
-    throw e; // fetch 자체가 실패면 여기서 끝내는 게 정상
+    throw e; // fetch 실패는 진짜 실패니까 올려버리는 게 맞음
   }
-  // 3) 저장 (덮어쓰기)
+
+  // C) 캐시 저장: fresh가 null이 아닌 상태에서만
   try {
-    await cacheSet(key, { savedAt: Date.now(), data: fresh });
-    console.log("[Overpass cache] SAVED");
+    await cacheSet(key, { savedAt: Date.now(), data: JSON.stringify(fresh) });
+    console.log("[Overpass cache] Saved", key);
   } catch (e) {
-    console.warn("[Overpass cache] save failed (quota/private mode?)", e);
+    console.warn("[Overpass cache] save failed", e);
   }
 
   return { data: fresh, fromCache: false };
 }
+
 
 
 // (선택) 콘솔에서 캐시 삭제: await window.clearOverpassCache()
