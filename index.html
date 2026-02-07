@@ -481,11 +481,14 @@ async function getOverpassWithCache(query, opts = {}) {
   if (!forceNetwork) {
     // 1) 캐시가 있으면 "무조건" 사용 (시간 제한 없음)
     try {
-      const hit = await cacheGet(key);
-      if (hit && hit.data) {
-        console.log("[Overpass cache] HIT", hit.savedAt ? new Date(hit.savedAt).toISOString() : "");
-        return { data: hit.data, fromCache: true };
-      }
+await cacheSet(key, { savedAt: Date.now(), data: JSON.stringify(fresh) });
+
+// 읽을 때
+const hit = await cacheGet(key);
+if (hit && hit.data) {
+  const obj = (typeof hit.data === "string") ? JSON.parse(hit.data) : hit.data;
+  return { data: obj, fromCache: true };
+}
       console.log("[Overpass cache] MISS");
     } catch (e) {
       console.warn("[Overpass cache] read failed -> no-cache mode", e);
@@ -1016,6 +1019,7 @@ let hideAltName = (localStorage.getItem(SETTINGS_KEY) === "1");
     let totalStationsCount = 0;
     let matchedStationsCount = 0;
 window.lineStats = window.lineStats || {};
+const lineStats = window.lineStats;
     function drawLines(lines){
       lines.forEach(Ln=>{
         lineStats[Ln.name]=lineStats[Ln.name]||{total:0,matched:0,color:Ln.color};
@@ -1207,7 +1211,7 @@ function syncLineStatsFromLineStops(){
   if (!d?.lineStops) return;
 
   window.lineStats = window.lineStats || {};
-
+  const lineStats = window.lineStats;
 
   for (const [lineName, stops] of Object.entries(d.lineStops)) {
     const total = Array.isArray(stops) ? stops.length : 0;
@@ -1734,7 +1738,17 @@ for (const name of connectingLines) {
     
     // 화면 크기 변경 시 UI 업데이트 (PC-모바일 전환 시)
     window.addEventListener('resize', updateUI);
-
+async function tryPersistStorage() {
+  if (!navigator.storage || !navigator.storage.persist) return;
+  const persisted = await navigator.storage.persisted();
+  if (!persisted) {
+    const ok = await navigator.storage.persist();
+    console.log("[storage] persist request:", ok);
+  } else {
+    console.log("[storage] already persisted");
+  }
+}
+await tryPersistStorage();
     init();
 
 
