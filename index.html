@@ -1208,7 +1208,7 @@ function syncLineStatsFromLineStops(){
   if (!d?.lineStops) return;
 
   window.lineStats = window.lineStats || {};
-  const lineStats = window.lineStats;
+
 
   for (const [lineName, stops] of Object.entries(d.lineStops)) {
     const total = Array.isArray(stops) ? stops.length : 0;
