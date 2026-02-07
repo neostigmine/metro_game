@@ -496,8 +496,13 @@ if (hit && hit.data) {
   }
 
   // 2) 네트워크 fetch
-  const fresh = await fetchOverpass(query);
-
+ let fresh = null;
+  try {
+    fresh = await fetchOverpass(query); // 네가 쓰는 실제 fetch 함수명으로
+  } catch (e) {
+    console.error("[Overpass] fetch failed", e);
+    throw e; // fetch 자체가 실패면 여기서 끝내는 게 정상
+  }
   // 3) 저장 (덮어쓰기)
   try {
     await cacheSet(key, { savedAt: Date.now(), data: fresh });
