@@ -1,1 +1,1805 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>수도권 지하철 역명 맞추기</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+ /* ==========================================================
+   Base
+   ========================================================== */
+html, body, #map { height: 100%; margin: 0; }
+body {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans KR', sans-serif;
+  overflow: hidden;
+}
 
+/* 지도는 무조건 바닥 레이어 */
+#map { position: relative; z-index: 0; }
+
+/* ==========================================================
+   PC UI (Topbar / Sidebar)
+   ========================================================== */
+.topbar {
+  position: absolute;
+  z-index: 10010;
+  top: .75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255,255,255,.95);
+  border-radius: 14px;
+  padding: .5rem .75rem;
+  font: 14px/1.2 system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans KR', sans-serif;
+  display: flex;
+  gap: .5rem;
+  align-items: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,.06);
+  pointer-events: auto;
+}
+.topbar input {
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  padding: .35rem .5rem;
+  font-size: 14px;
+  width: 240px;
+}
+
+.sidebar {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 300px;
+  height: 100%;
+  background: rgba(255,255,255,.98);
+  overflow-y: auto;
+  z-index: 10000;
+  padding: .75rem .75rem 1rem;
+  border-left: 1px solid #e5e5e5;
+  box-shadow: -4px 0 8px rgba(0,0,0,.04);
+  pointer-events: auto;
+}
+.sidebar h3 { font-size: 15px; margin: 0 0 .5rem 0; }
+.line-item {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  align-items: center;
+  gap: .5rem;
+  padding: .25rem .25rem;
+  font-size: 13px;
+  border-radius: 8px;
+}
+.line-item:hover { background: rgba(0,0,0,.035); }
+.line-dot { width: 14px; height: 14px; border-radius: 50%; border: 1px solid #ddd; }
+.count { font-variant-numeric: tabular-nums; color: #333; }
+
+/* ==========================================================
+   Station Marker / Label
+   ========================================================== */
+.station-icon {
+  width: 10px;
+  height: 10px;
+  border: 1px solid #999;
+  background-color: #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 1px rgba(0,0,0,.4);
+}
+
+.label-text {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  font-size: 13px;
+  font-weight: 800;
+  color: #111;
+  text-shadow: 0 0 2px #fff, 0 0 4px #fff;
+  white-space: nowrap;
+}
+.leaflet-tooltip-top.label-text::before,
+.leaflet-tooltip-bottom.label-text::before,
+.leaflet-tooltip-left.label-text::before,
+.leaflet-tooltip-right.label-text::before { border: none !important; }
+
+/* Leaflet 캔버스가 터치 먹는 경우 차단(선 클릭 안 쓸 때 추천) */
+.leaflet-overlay-pane canvas.leaflet-zoom-animated,
+.leaflet-map-pane canvas.leaflet-zoom-animated{
+  pointer-events: none !important;
+}
+
+/* ==========================================================
+   Options Menu (PC+Mobile 공통)
+   ========================================================== */
+.search-box, .topbar { gap: 8px; }
+
+.options-wrap { position: relative; display: inline-block; }
+
+.options-button, #optionsBtn, #optionsBtnPC {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid rgba(0,0,0,.15);
+  border-radius: 12px;
+  background: rgba(255,255,255,.95);
+  color: #111;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.options-menu{
+  position: absolute;
+  right: 0;
+  top: 44px;
+  min-width: 190px;
+  background: rgba(255,255,255,.98);
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.12);
+  padding: 8px;
+  z-index: 20000; /* 메뉴는 해당 UI 안에서 최상단 */
+}
+
+.options-item-btn{
+  width: 100%;
+  text-align: left;
+  padding: 10px 10px;
+  border-radius: 10px;
+  background: transparent;
+  border: 0;
+  font-size: 14px;
+  color: #111;
+  cursor: pointer;
+}
+.options-item-btn:hover{ background: rgba(0,0,0,.05); }
+
+/* ==========================================================
+   Mobile UI
+   ========================================================== */
+/* PC에서 모바일 UI 숨김 */
+.dashboard, .search-box { display: none; }
+
+/* 모바일에서만 표시 + "지도 밖 레이어"로 고정 */
+@media (max-width: 768px) {
+  .topbar, .sidebar { display: none !important; }
+
+  .dashboard {
+    display: block;
+    position: fixed;           /* ✅ absolute 금지 */
+    top: 0; left: 0; right: 0;
+    z-index: 1000000;          /* ✅ map 위 확정 */
+    background: rgba(255,255,255,1);
+    padding: 10px 10px 5px;
+    box-shadow: 0 3px 6px rgba(0,0,0,.1);
+    pointer-events: none;      /* ✅ 빈 영역은 터치 통과 */
+  }
+  .dashboard button, .dashboard input, .dashboard a {
+    pointer-events: auto;      /* ✅ 실제 컨트롤만 터치 가능 */
+  }
+
+  .completion-rate { margin-bottom: 5px; }
+  .rate-number { font-size: 24px; font-weight: 800; color: #333; }
+  .rate-text { font-size: 16px; font-weight: 500; color: #555; margin-left: 5px; }
+
+  .line-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    max-height: 200px;
+    overflow-y: auto;
+    padding-bottom: 5px;
+  }
+  .line-group { display: flex; flex-wrap: wrap; gap: 8px; }
+  .line-button {
+    border: none;
+    color: white;
+    font-weight: 700;
+    cursor: pointer;
+    text-align: center;
+    transition: opacity 0.2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,.15);
+  }
+  .main-lines .line-button {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    font-size: 16px;
+    line-height: 38px;
+    padding: 0;
+  }
+  .other-lines .line-button {
+    border-radius: 20px;
+    font-size: 12px;
+    padding: 6px 12px;
+    min-width: 60px;
+  }
+
+  .search-box {
+    display: flex;
+    position: fixed;           /* ✅ absolute 금지 */
+    left: 15px;
+    right: 15px;
+    top: 260px;                /* 필요하면 dashboard 높이에 맞게 조절 */
+    z-index: 1000001;          /* ✅ dashboard보다 위 */
+    background: #fff;
+    border-radius: 10px;
+    padding: 5px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    pointer-events: auto;
+    transform: none;           /* ✅ stacking 꼬임 방지 */
+  }
+
+  .station-input{
+    flex: 1;
+    min-width: 0;
+    border: none;
+    padding: 10px 15px;
+    font-size: 16px;
+    outline: none;
+  }
+}
+</style>
+</head>
+
+<body>
+  <div id="map"></div>
+
+  <div class="topbar">
+    <strong>수도권 지하철</strong>
+    <input type="text" id="stationSearchPC" placeholder="역 이름을 입력" />
+
+    <div class="options-wrap">
+      <button class="options-button" id="optionsBtnPC" type="button" aria-label="옵션">⋮</button>
+
+      <div class="options-menu" id="optionsMenuPC" hidden>
+        <button class="options-item-btn" id="toggleAltNameBtnPC" type="button">
+          부역명/병기역명 표시
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <h3>노선 목록</h3>
+    <div id="lineList"></div>
+  </div>
+
+  <div class="dashboard">
+    <div class="completion-rate">
+      <span class="rate-number" id="totalRate">0.0 %</span>
+      <span class="rate-text">역 발견됨</span>
+    </div>
+    <div class="line-buttons" id="lineButtons"></div>
+  </div>
+
+  <div class="search-box">
+    <input type="text" id="stationSearchMobile" placeholder="역 이름을 입력" class="station-input" />
+
+    <div class="options-wrap">
+      <button class="options-button" id="optionsBtnMobile" type="button" aria-label="옵션">⋮</button>
+
+      <div class="options-menu" id="optionsMenuMobile" hidden>
+        <button class="options-item-btn" id="toggleAltNameBtnMobile" type="button">
+          부역명/병기역명 표시
+        </button>
+      </div>
+    </div>
+  </div>
+</body>
+
+
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+
+    // 노선 색상, toCanonicalLine, normStationKey, fetchOverpass, parseData, sortLineEntries, drawLines, nearestLine, computeTotals 함수는 동일하게 유지
+    const map = L.map('map', {
+    renderer: L.canvas() // 이 한 줄이 랙을 엄청나게 줄여줍니다!
+	}).setView([37.56, 126.98], 11);
+	
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+	const bbox = [36.7, 126.4, 38.3, 127.9];
+const overpassQuery = `[out:json][timeout:300];
+(
+	relation["type"="route"]["route"~"^(subway|metro|light_rail|tram|monorail|train|railway|maglev)$"](${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]})
+    ->.routes;
+
+  way(r.routes);
+
+
+  way["railway"~"^(subway|light_rail|monorail|tram|metro|maglev)$"]
+    (${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
+
+  way["railway"~"^(subway|light_rail|monorail|tram|metro|rail|maglev)$"]
+    ["service"~"^(subway|metro|urban|commuter|high_speed)$"]
+    (${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
+
+  node["railway"~"^(station|halt|tram_stop)$"]["amenity"!="bus_station"]
+    (${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
+
+  node["public_transport"="stop_position"]
+    ["railway"~"^(stop|station|halt|tram_stop|rail)$"]
+    ["amenity"!="bus_station"]
+    (${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
+	way["railway"~"^(station|halt)$"]["amenity"!="bus_station"](${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
+relation["public_transport"="stop_area"]["amenity"!="bus_station"](${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
+relation["public_transport"="station"]["amenity"!="bus_station"](${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
+
+  relation(17413295) ->.gtxa;
+  .gtxa;
+);
+out geom;`
+
+
+
+    const colorMap = {
+      "1호선": "#0052A4","2호선": "#00A84D","3호선": "#EF7C1E","4호선": "#00A2D1","5호선": "#A664A3",
+      "6호선": "#9E4510","7호선": "#5D6519","8호선": "#D6406A","9호선": "#8E764B",
+      "수인·분당선": "#E0A134","경의·중앙선": "#2ABFD0","공항철도": "#006D9D","신분당선": "#BB1834",
+      "경강선": "#003DA5","경춘선": "#0C8E72","서해선": "#81A914",
+      "김포골드라인": "#A17800","의정부경전철": "#FDA600","용인경전철": "#509F22","우이신설선": "#B0CE18",
+      "신림선": "#6789CA","인천1호선": "#6E98BB","인천2호선": "#ED8B00", "GTX-A":"#9A6292", "인천공항자기부상열차": "#FFD400",
+    };
+	
+function toCanonicalLine(raw=""){
+      let n = (raw||"").toString().normalize("NFKC");
+      // 잡다한 수식어 제거
+	    const orig = n; // 셔틀 제거 전 원문 보관
+	    if (/(인천국제공항|incheon\s*international\s*airport)/i.test(orig) &&
+      /(오렌지\s*셔틀|orange\s*shuttle|셔틀트레인|셔틀\s*트레인|셔틀|shuttle)/i.test(orig)) {
+    return ""; // 지도에서 아예 빼기 (원하면 다른 노선명으로 return 해도 됨)
+  }
+      n = n.replace(/:.*/g, "").replace(/\(.*?\)/g, "").replace(/내선|외선|상행|하행|상선|하선|inbound|outbound/gi, "").replace(/[·\.‧∙・․]/g, "·").replace(/\s+/g, " ").trim();
+      n = n.replace(/(성수\s*지선|신설\s*지선|지선)/g, "").replace(/(급행|익스프레스|express)/ig, "").replace(/(셔틀|셔틀트레인|shuttle)/ig, "").replace(/(직통|직통열차|direct)/ig, "").replace(/계통/g, "").replace(/\s+/g, " ").trim();
+      n = n.replace(/^수도권 ?전철\s*/g, "").replace(/^서울 ?(지하철|경전철)\s*/g, "").replace(/^인천국제공항철도\s*/g, "공항철도 ").trim();
+      
+      // [필터링] KTX, SRT, 일반 열차 등은 지도에 안 그리기 위해 빈 값 리턴
+      if (/KTX|SRT|새마을|무궁화|누리로|ITX|청춘|가라판|화물|바다열차/.test(n)) return "";
+if (/GTX\s*-?\s*A/i.test(n) || /광역급행철도\s*A/i.test(n) || n === "A노선" || n.includes("GTX A")) {
+    return "GTX-A";
+  }   if (/^신분당선/.test(n)) return "신분당선";
+      if (/^1호선/.test(n) || /\b1\s*호선\b/.test(n) || /^(경인선|경원선|장항선)/.test(n)) return "1호선";
+      if (/^2호선/.test(n) || /\b2\s*호선\b/.test(n)) return "2호선";
+      // [핵심] 일산선 잡아서 3호선으로 편입
+      if (/^3호선/.test(n) || /\b3\s*호선\b/.test(n) || /일산선/.test(n)) return "3호선"; 
+      if (/^4호선/.test(n) || /\b4\s*호선\b/.test(n) || /^(과천선|안산선)/.test(n)) return "4호선";
+      if (/^5호선/.test(n) || /\b5\s*호선\b/.test(n)) return "5호선";
+      if (/^6호선/.test(n) || /\b6\s*호선\b/.test(n)) return "6호선";
+      if (/^7호선/.test(n) || /\b7\s*호선\b/.test(n)) return "7호선";
+      if (/^8호선/.test(n) || /\b8\s*호선\b/.test(n)) return "8호선";
+      if (/^9호선/.test(n) || /\b9\s*호선\b/.test(n)) return "9호선";
+
+      if (/^(수인.?분당선|분당선|수인선)$/.test(n)) return "수인·분당선";
+      if (/(경의.?중앙선|경의선|중앙선)/.test(n)) return "경의·중앙선";
+      if (/인천국제공항|AREX|공항철도/i.test(n)) return "공항철도";
+      if (/경춘선/.test(n)) return "경춘선";
+      if (/경강선/.test(n)) return "경강선";
+      if (/서해선/.test(n)) return "서해선";
+      if (/김포/.test(n)) return "김포골드라인";
+      if (/의정부/.test(n)) return "의정부경전철";
+      if (/용인|에버라인/.test(n)) return "용인경전철";
+      if (/우이신설/.test(n)) return "우이신설선";
+      if (/신림/.test(n)) return "신림선";
+      if (/인천.?1호선|인천 도시철도 1호선/.test(n)) return "인천1호선";
+      if (/인천.?2호선|인천 도시철도 2호선/.test(n)) return "인천2호선";
+// GTX-A 인식 로직 강화
+  if (/GTX\s*-?\s*A/i.test(n) || /수도권\s?광역급행철도\s?A/i.test(n)) return "GTX-A";
+  // 위 목록에 없으면(예: KTX 노선명 등) 그리지 않음
+    if (/(인천\s*공항\s*자기\s*부상|인천공항\s*자기부상|인천공항\s*자기부상철도|Incheon\s*Airport\s*Maglev|Incheon\s*Maglev)/i.test(n))
+    return "인천공항자기부상열차";
+
+      return "";
+    }
+// 2) 별칭(병기명/부역명) -> 표준 역명 매핑 (함수 밖에!)
+const ALIAS = {
+  "남부터미널예술의전당": "남부터미널",
+  "구성gtx": "구성",
+  // 공백은 norm에서 제거되므로 "구성 gtx"는 사실상 불필요
+};
+
+function normStationKey(s = "") {
+  // 1) 기본 정규화
+  const k = String(s).trim().normalize("NFKC")
+    .replace(/[\(\)\[\]{}]/g, "")
+    .replace(/\s+/g, "")
+    .replace(/[·\.‧∙・․]/g, "·")
+    .replace(/역$/, "")
+    .toLowerCase();
+
+  // 2) 별칭 적용
+  const mapped = ALIAS[k] ?? k;
+
+  // 3) 별칭 결과도 동일 규칙으로 정규화해서 반환(안전)
+  return String(mapped).trim().normalize("NFKC")
+    .replace(/[\(\)\[\]{}]/g, "")
+    .replace(/\s+/g, "")
+    .replace(/[·\.‧∙・․]/g, "·")
+    .replace(/역$/, "")
+    .toLowerCase();
+}
+
+	
+	// =====================
+// Overpass 캐시 (IndexedDB)
+// =====================
+const OVERPASS_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 3; // 3일 (원하면 조절)
+const OVERPASS_CACHE_DB = "subway-overpass-cache-v1";
+const OVERPASS_CACHE_STORE = "kv";
+
+function fnv1a(str) {
+  // 짧은 해시(키 길이 줄이기용)
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+  }
+  return ("0000000" + h.toString(16)).slice(-8);
+}
+
+function openCacheDB() {
+  return new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) return reject(new Error("IndexedDB not supported"));
+    const req = indexedDB.open(OVERPASS_CACHE_DB, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(OVERPASS_CACHE_STORE)) {
+        db.createObjectStore(OVERPASS_CACHE_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function cacheGet(key) {
+  const db = await openCacheDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(OVERPASS_CACHE_STORE, "readonly");
+    const store = tx.objectStore(OVERPASS_CACHE_STORE);
+    const req = store.get(key);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+    tx.oncomplete = () => db.close();
+  });
+}
+
+async function cacheSet(key, value) {
+  const db = await openCacheDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(OVERPASS_CACHE_STORE, "readwrite");
+    const store = tx.objectStore(OVERPASS_CACHE_STORE);
+    const req = store.put(value, key);
+    req.onsuccess = () => resolve(true);
+    req.onerror = () => reject(req.error);
+    tx.oncomplete = () => db.close();
+  });
+}
+async function getOverpassWithCache(overpassQuery) {
+  const key = `overpass:v8:${fnv1a(overpassQuery)}`; // 네 방식 그대로
+
+  // A) 캐시 읽기: 실패해도 경고만
+  try {
+    const hit = await cacheGet(key);
+    if (hit && hit.data) {
+      const obj = (typeof hit.data === "string") ? JSON.parse(hit.data) : hit.data;
+      console.log("[Overpass cache] Hit", key);
+      return { data: obj, fromCache: true };
+    }
+    console.log("[Overpass cache] Miss", key);
+  } catch (e) {
+    console.warn("[Overpass cache] read failed -> no-cache mode", e);
+  }
+
+  // B) fetch: fresh는 여기서만 채운다 (선언을 먼저!)
+  let fresh = null;
+  try {
+    fresh = await fetchOverpassCached(overpassQuery); // 네 fetch 함수명으로
+  } catch (e) {
+    console.error("[Overpass] fetch failed", e);
+    throw e; // fetch 실패는 진짜 실패니까 올려버리는 게 맞음
+  }
+
+  // C) 캐시 저장: fresh가 null이 아닌 상태에서만
+  try {
+    await cacheSet(key, { savedAt: Date.now(), data: JSON.stringify(fresh) });
+    console.log("[Overpass cache] Saved", key);
+  } catch (e) {
+    console.warn("[Overpass cache] save failed", e);
+  }
+
+  return { data: fresh, fromCache: false };
+}
+
+
+
+// (선택) 콘솔에서 캐시 삭제: await window.clearOverpassCache()
+window.clearOverpassCache = async () => {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.deleteDatabase(OVERPASS_CACHE_DB);
+    req.onsuccess = () => resolve(true);
+    req.onerror = () => reject(req.error);
+  });
+};
+
+	
+	async function fetchOverpassCached(query, cacheKey, maxAgeHours = 24) {
+  const now = Date.now();
+  const raw = localStorage.getItem(cacheKey);
+  if (raw) {
+    try {
+      const obj = JSON.parse(raw);
+      const ageH = (now - (obj.savedAt || 0)) / 36e5;
+      if (obj.data && ageH <= maxAgeHours) {
+        console.log("[cache] hit", cacheKey, `age=${ageH.toFixed(2)}h`);
+        return obj.data;
+      }
+    } catch {}
+  }
+
+  const data = await fetchOverpass(query); // 기존 함수 그대로 사용
+  try {
+    localStorage.setItem(cacheKey, JSON.stringify({ savedAt: now, data }));
+    console.log("[cache] saved", cacheKey);
+  } catch (e) {
+    console.warn("[cache] save failed (quota?)", e);
+  }
+  return data;
+}
+
+const ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
+];
+
+async function fetchOverpass(overpassQuery) {
+  const body = "data=" + encodeURIComponent(overpassQuery);
+
+  let lastErr = null;
+  for (const url of ENDPOINTS) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+        body,
+      });
+
+      const text = await res.text();
+      console.log("OVERPASS status:", res.status, "via", url);
+      console.log("OVERPASS head:", text.slice(0, 300));
+
+      if (!res.ok) {
+        // 504/5xx면 다른 서버로
+        lastErr = new Error(`Overpass HTTP ${res.status} via ${url}`);
+        if (res.status === 504 || res.status >= 500) continue;
+        throw lastErr;
+      }
+      return JSON.parse(text);
+    } catch (e) {
+      lastErr = e;
+      // CORS로 막히는 서버도 있으니 그땐 다음 엔드포인트로
+      continue;
+    }
+  }
+  throw lastErr || new Error("All Overpass endpoints failed.");
+}
+
+
+      const wayMap = new Map();
+	
+function injectLineFromRelation(elements, relationIds, forcedName, forcedColor, linesArray) {
+  const waysById = new Map();
+  for (const el of elements) {
+    if (el.type === "way" && Array.isArray(el.geometry) && el.geometry.length >= 2) {
+      waysById.set(el.id, el.geometry.map(p => [p.lat, p.lon]));
+    }
+  }
+
+  const relSet = new Set(relationIds);
+
+  const segs = [];
+  for (const el of elements) {
+    if (el.type === "relation" && relSet.has(el.id) && Array.isArray(el.members)) {
+      for (const m of el.members) {
+        if (m.type === "way") {
+          const g = waysById.get(m.ref);
+          if (g && g.length >= 2) segs.push(g);
+        }
+      }
+    }
+  }
+
+  if (segs.length === 0) return false;
+  linesArray.push({ name: forcedName, color: forcedColor, segs });
+  return true;
+}
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = x => x * Math.PI / 180;
+  const a1 = toRad(lat1), o1 = toRad(lon1);
+  const a2 = toRad(lat2), o2 = toRad(lon2);
+  const da = a2 - a1, doo = o2 - o1;
+  const h =
+    Math.sin(da/2)**2 +
+    Math.cos(a1)*Math.cos(a2)*Math.sin(doo/2)**2;
+  return 2*R*Math.asin(Math.min(1, Math.sqrt(h)));
+}
+function addStopPointsByNearestStation(lineStops, lineStopPoints, stations) {
+  for (const [lineName, pts] of lineStopPoints.entries()) {
+    if (!lineStops.has(lineName)) lineStops.set(lineName, new Set());
+    const set = lineStops.get(lineName);
+
+    // 공항/대형역은 stop_position ↔ station node가 멀 수 있어 threshold를 좀 크게
+    const maxD = (lineName === "공항철도") ? 2000 : 1200;
+
+    for (const [lat, lon] of pts) {
+      let bestKey = null, bestD = Infinity;
+      for (const st of stations) {
+        const d = haversineMeters(lat, lon, st.lat, st.lon);
+        if (d < bestD) { bestD = d; bestKey = st.key; }
+      }
+      if (bestKey && bestD <= maxD) set.add(bestKey);
+    }
+  }
+}
+
+
+
+function addManualLineStops(lineStops, rawLineName, stationNames) {
+  const lineName = toCanonicalLine(rawLineName) || rawLineName; // ✅ 노선 키 통일
+  if (!lineStops.has(lineName)) lineStops.set(lineName, new Set());
+  const set = lineStops.get(lineName);
+
+  for (const n of stationNames) {
+    const k = normStationKey(n);
+    if (k) set.add(k); // ✅ 덮어쓰기 X, 계속 추가
+  }
+}
+
+function parseData(data) {
+  const elements = data.elements || [];
+
+  const wayMap = new Map();
+  const lineMap = new Map();
+  const rawStations = [];
+  const nodeMap = new Map();
+const relMap = new Map();
+for (const el of elements) {
+  if (el.type === "node") nodeMap.set(el.id, el);
+  else if (el.type === "relation") relMap.set(el.id, el);
+}
+
+  const usedWayIds = new Set();
+  function distMeters(a, b) {
+    const R = 6371000;
+    const toRad = x => x * Math.PI / 180;
+    const lat1 = toRad(a.lat), lon1 = toRad(a.lon);
+    const lat2 = toRad(b.lat), lon2 = toRad(b.lon);
+    const dlat = lat2 - lat1;
+    const dlon = lon2 - lon1;
+    const h =
+      Math.sin(dlat / 2) ** 2 +
+      Math.cos(lat1) * Math.cos(lat2) * Math.sin(dlon / 2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+  // 1) 선로 좌표 수집
+const wayInfoMap = new Map(); // id -> { seg, tags }
+
+for (const el of elements) {
+  if (el.type === "way" && Array.isArray(el.geometry)) {
+    const seg = el.geometry.map(p => [p.lat, p.lon]);
+    wayMap.set(el.id, seg);
+    wayInfoMap.set(el.id, { seg, tags: el.tags || {} });
+  }
+}
+
+  // 2) 노선(Relation) 처리
+  const lineStops = new Map(); // lineName -> Set(stationKey)
+  const lineStopPoints = new Map(); // lineName -> Array<[lat, lon]> (이름 없는 stop_position 등)
+  for (const el of elements) {
+    const t = el.tags || {};
+    const r = (t.route || "");
+
+    if (el.type === "relation" && t.type === "route" &&
+        /^(subway|metro|light_rail|tram|monorail|train|railway|maglev)$/.test(r)) {
+
+      const raw = t["name:ko"] || t.name || t.ref || "";
+      const name = toCanonicalLine(raw);
+      if (!name) continue;
+
+      const color = colorMap[name] || t.colour || t.color || "#003DA5";
+      if (!lineMap.has(name)) lineMap.set(name, { name, color, segs: [] });
+
+if (Array.isArray(el.members)) {
+  for (const m of el.members) {
+    // 선로
+if (m.type === "way" && wayInfoMap.has(m.ref)) {
+  const info = wayInfoMap.get(m.ref);
+  const svc = (info.tags.service || "").toLowerCase();
+
+  // ✅ 차량기지/측선/유치선/분기선 등은 노선도에서 제외
+  if (/(yard|siding|spur|stabling|crossover)/.test(svc)) continue;
+
+  lineMap.get(name).segs.push(info.seg);
+  usedWayIds.add(m.ref);
+  continue;
+}
+
+    // ✅ 정차역(stop/platform 등) 수집: 이름 없으면 좌표로 저장
+    const role = (m.role || "").toLowerCase();
+    const isStopLike =
+      role.includes("stop") ||
+      role.includes("platform") ||
+      role.includes("stop_entry_only") ||
+      role.includes("stop_exit_only");
+
+    if (isStopLike && m.type === "node") {
+      const nEl = nodeMap.get(m.ref);
+      if (!nEl) continue;
+      const nt = nEl.tags || {};
+      const n = nt["name:ko"] || nt.name || "";
+
+      if (n) {
+        const key = normStationKey(n);
+        if (!lineStops.has(name)) lineStops.set(name, new Set());
+        lineStops.get(name).add(key);
+      } else {
+        if (!lineStopPoints.has(name)) lineStopPoints.set(name, []);
+        lineStopPoints.get(name).push([nEl.lat, nEl.lon]); // 이름 없는 stop_position 대비
+      }
+    }
+
+    // stop_area가 멤버로 들어오는 경우(이름만으로도 key 추가 가능)
+    if (isStopLike && m.type === "relation") {
+      const rEl = relMap.get(m.ref);
+      if (!rEl) continue;
+      const rt = rEl.tags || {};
+      const n = rt["name:ko"] || rt.name || "";
+      if (!n) continue;
+
+      const key = normStationKey(n);
+      if (!lineStops.has(name)) lineStops.set(name, new Set());
+      lineStops.get(name).add(key);
+    }
+  }
+}
+
+
+    }
+
+    // 2-1) 역 정보 수집 (node)
+    if (el.type === "node" && (t.railway === "station" || t.public_transport === "station")) {
+      const n = t["name:ko"] || t.name || "";
+      if (n && n !== "원릉") rawStations.push({ name: n, key: normStationKey(n), lat: el.lat, lon: el.lon });
+    }
+
+    // 2-2) 역 정보 수집 (way: station, out center 필요)
+    if (el.type === "way" && t.railway === "station" && el.center) {
+      const n = t["name:ko"] || t.name || "";
+      if (n && n !== "원릉") rawStations.push({ name: n, key: normStationKey(n), lat: el.center.lat, lon: el.center.lon });
+    }
+
+    // 2-3) 역 정보 수집 (relation: stop_area/station, out center 필요)
+if (el.type === "relation" && t.public_transport === "stop_area" && el.center) {
+  const n = t["name:ko"] || t.name || "";
+  if (n && n !== "원릉") {
+    rawStations.push({ name: n, key: normStationKey(n), lat: el.center.lat, lon: el.center.lon, _stop_area: true });
+  }
+}
+
+  }
+
+  // 3) 왕따 선로 구제
+  for (const el of elements) {
+    if (el.type === "way" && wayMap.has(el.id) && !usedWayIds.has(el.id)) {
+      const t = el.tags || {};
+      const isRailway = /^(subway|light_rail|metro|monorail|rail|train)$/.test(t.railway || "");
+      if (!isRailway) continue;
+
+      const raw = t["name:ko"] || t.name || t.ref || "";
+      const name = toCanonicalLine(raw);
+      if (name && lineMap.has(name)) {
+        lineMap.get(name).segs.push(wayMap.get(el.id));
+        usedWayIds.add(el.id);
+      }
+	  const svc = (t.service || "").toLowerCase();
+if (/(yard|siding|spur|stabling|crossover)/.test(svc)) continue;
+    }
+  }
+
+  const linesArray = Array.from(lineMap.values());
+
+  // 3.5) GTX-A 강제 주입 (relation id)
+  injectLineFromRelation(elements, [17413295], "GTX-A", (colorMap["GTX-A"] || "#8B1C62"), linesArray);
+
+
+  // 4) 역 필터링 + 중복 제거 (환승역 병합)
+// ===== 역 병합(클러스터링) =====
+
+
+const THRESH_M = 450; // 필요시 600~800까지 올려보기
+
+// 1) 선로 근처 필터 통과한 후보만 모으기
+// 1) 선로 근처 필터 통과한 후보만 모으기 (안전 버전)
+const candidates = [];
+let sawAnyPointGlobal = false;
+
+for (const s of rawStations) {
+  let minD2 = Infinity;
+  let sawPoint = false;
+
+  if (linesArray.length > 0) {
+    for (const Ln of linesArray) {
+      // ⚠️ 여기서 GTX-A를 빼지 마. parseData는 "전체 역 목록"이 목적이라서 부작용 큼.
+      for (const seg of Ln.segs) {
+        if (!Array.isArray(seg) || seg.length === 0) continue;
+        for (const p of seg) {
+          sawPoint = true;
+          sawAnyPointGlobal = true;
+          const d2 = (s.lat - p[0]) ** 2 + (s.lon - p[1]) ** 2;
+          if (d2 < minD2) minD2 = d2;
+        }
+      }
+    }
+  }
+
+  // ✅ 선로 점을 한 번도 못 봤으면 필터 적용하지 않음 (자동역 몰살 방지)
+  if (linesArray.length !== 0 && sawAnyPointGlobal && sawPoint && minD2 >= 0.0005) continue;
+
+  candidates.push({ ...s });
+}
+
+
+// 2) key별로 묶기
+const groups = new Map();
+for (const s of candidates) {
+  const k = s.key;
+  if (!groups.has(k)) groups.set(k, []);
+  groups.get(k).push(s);
+}
+
+// 3) 각 key 그룹에서 거리 기준 클러스터링 → 클러스터마다 1개로 압축
+const dedup = [];
+for (const [key, arr] of groups.entries()) {
+  if (arr.length === 1) {
+    dedup.push(arr[0]);
+    continue;
+  }
+
+  const used = new Array(arr.length).fill(false);
+
+  for (let i = 0; i < arr.length; i++) {
+    if (used[i]) continue;
+    used[i] = true;
+
+    const q = [i];
+    const comp = [arr[i]];
+
+    while (q.length) {
+      const u = q.pop();
+      for (let v = 0; v < arr.length; v++) {
+        if (used[v]) continue;
+        if (distMeters(arr[u], arr[v]) <= THRESH_M) {
+          used[v] = true;
+          q.push(v);
+          comp.push(arr[v]);
+        }
+      }
+    }
+
+    let lat = 0, lon = 0;
+    for (const s of comp) { lat += s.lat; lon += s.lon; }
+    lat /= comp.length; lon /= comp.length;
+
+    dedup.push({ ...comp[0], key, lat, lon });
+  }
+}
+
+function mergeManualStations(base, manual) {
+  const out = base.slice();         // ✅ base는 전부 유지
+  const TH_M = 300;                 // manual 좌표와 300m 이내면 "그 역"으로 간주(필요시 조절)
+
+  for (const m of (manual || [])) {
+    let bestIdx = -1;
+    let bestD = Infinity;
+
+    for (let i = 0; i < out.length; i++) {
+      const s = out[i];
+      if (s.key !== m.key) continue;              // 같은 '역명 key' 후보만 비교
+      const d = haversineMeters(s.lat, s.lon, m.lat, m.lon);
+      if (d < bestD) { bestD = d; bestIdx = i; }
+    }
+
+    if (bestIdx >= 0 && bestD <= TH_M) {
+      // ✅ 가장 가까운 1개만 manual로 보정(덮어쓰기)
+      out[bestIdx] = { ...out[bestIdx], ...m, _manual: true };
+    } else {
+      // ✅ 근처에 같은 이름 역이 없으면 새로 추가
+      out.push({ ...m, _manual: true });
+    }
+  }
+
+  return out;
+}
+
+
+const manualStations = [
+  { key: normStationKey("초월"), name: "초월", line: "경강선", lat: 37.3736, lon: 127.2995 },
+  { key: normStationKey("임학"), name: "임학", line: "인천1호선", lat: 37.5455, lon: 126.7389 },
+  { key: normStationKey("박촌"), name: "박촌", line: "인천1호선", lat: 37.5536, lon: 126.7450 },
+  { key: normStationKey("양평"), name: "양평", line: "경의·중앙선", lat: 37.4928, lon: 127.4918 },
+  { key: normStationKey("신촌"), name: "신촌", line: "경의·중앙선", lat: 37.5597, lon: 126.9423 },
+  { key: normStationKey("부천시청"), name: "부천시청", line: "7호선", lat: 37.5046, lon: 126.7639 },
+
+
+];
+
+const dedup2 = mergeManualStations(dedup, manualStations);
+addStopPointsByNearestStation(lineStops, lineStopPoints, dedup2);
+
+const stationsFinal = mergeManualStations(dedup, manualStations);
+// DEBUG: 같은 역 이름이 여러 개로 남아있는지 체크
+const m = new Map();
+for (const s of dedup2) {
+  const base = (s.key || "").split("#")[0];
+  if (!m.has(base)) m.set(base, []);
+  m.get(base).push(s);
+}
+const dups = [...m.entries()].filter(([k, arr]) => arr.length >= 2);
+console.log("DUP STATIONS:", dups.map(([k, arr]) => ({
+  key: k,
+  n: arr.length,
+  pts: arr.map(x => [x.lat, x.lon])
+})));
+addManualLineStops(lineStops, "GTX-A", [
+  "운정중앙","킨텍스","대곡","연신내", "서울", "수서", "구성", "성남", "동탄",
+]);
+const lineStopsObj = Object.fromEntries(
+  [...lineStops.entries()].map(([k, v]) => [k, [...v]])
+);
+const EXCLUDED_STATION_NAMES = [
+  // 콘솔에서 복사한 key들 넣기
+  // 예: "월미공원" -> "월미공원" 키 형태
+  "월미문화의거리",
+  "월미공원",
+  "월미바다",
+  "탑승동",
+  "제1터미널",
+  "제2터미널",
+];
+const EXCLUDED_STATION_KEYS = new Set(EXCLUDED_STATION_NAMES.map(normStationKey));
+const filteredStations = dedup2.filter(s => !EXCLUDED_STATION_KEYS.has(s.key));
+
+return { lines: linesArray, stations: dedup2, lineStops: lineStopsObj };
+
+}
+
+
+function pickStationsForLine(lineName, allStations, lineSegs, manualByLine) {
+  const allow = new Set((manualByLine?.[lineName] || []).map(x => x.key));
+
+  const THRESH_M = 300; // 이건 보조
+  const out = [];
+
+  for (const st of allStations) {
+    // 1) 화이트리스트가 있으면 그것만 통과
+    if (allow.size > 0 && !allow.has(st.key)) continue;
+
+    // 2) (보조) 선로 근접 체크
+    if (distanceToLineMeters(st, lineSegs) <= THRESH_M) out.push(st);
+  }
+  return out;
+}
+    function sortLineEntries(entries){
+      function keyFor(name){const m=name.match(/^(\d+)호선$/);if(m)return{type:'num',val:parseInt(m[1],10)};return{type:'txt',val:name};}
+      return entries.sort(([aName],[bName])=>{const A=keyFor(aName),B=keyFor(bName);if(A.type!==B.type)return A.type==='num'?-1:1;if(A.type==='num')return A.val-B.val;return aName.localeCompare(bName,'ko');});
+    }
+
+function drawBaseMarkers(stations) {
+  const excludeKeys = new Set(
+    ["월미공원", "월미문화의거리", "월미바다", "박물관", "탑승동", "제1터미널", "제2터미널"].map(normStationKey) // 필요하면 추가
+  );
+
+  const baseIcon = L.divIcon({
+    className: 'base-station-marker',
+    html: `<div class='station-icon'></div>`,
+    iconSize: [12, 12],
+    iconAnchor: [6, 6]
+  });
+
+  stations.forEach(s => {
+    if (excludeKeys.has(s.key)) return; // ✅ 여기서 컷
+    L.marker([s.lat, s.lon], {
+      icon: baseIcon,
+      zIndexOffset: 100
+    }).addTo(map);
+  });
+}
+    let subwayData={lines:[],stations:[]};
+	const SETTINGS_KEY = "subway:v8:hideAltName";
+let hideAltName = (localStorage.getItem(SETTINGS_KEY) === "1");
+    const shownStations=new Map();
+    let totalStationsCount = 0;
+    let matchedStationsCount = 0;
+window.lineStats = window.lineStats || {};
+    function drawLines(lines){
+      lines.forEach(Ln=>{
+        lineStats[Ln.name]=lineStats[Ln.name]||{total:0,matched:0,color:Ln.color};
+        Ln.segs.forEach(seg=>{if(Array.isArray(seg)&&seg.length)L.polyline(seg,{color:Ln.color,weight:6,opacity:0.95,lineCap:'round'}).addTo(map);});
+      });
+    }
+	const STATION_LINE_OVERRIDE = new Map([
+  ["천호", { primary: "8호선", also: ["5호선"] }],
+  ["강동구청", { primary: "8호선" }],
+  // 필요하면 계속 추가
+]);
+	function nearestLine(lat, lon) {
+		let best = { d2: Infinity, color: '#003DA5', name: null };
+		  
+		  // 데이터가 아직 안 불러와졌으면 기본값 뱉고 튑니다.
+		  if (!subwayData || !subwayData.lines) return best;
+
+		  for (const Ln of subwayData.lines) {
+			for (const seg of Ln.segs) {
+			  for (const p of seg) {
+				const d2 = (lat - p[0]) ** 2 + (lon - p[1]) ** 2;
+				if (d2 < best.d2) {
+				  best = { d2, color: Ln.color, name: Ln.name };
+				}
+			  }
+			}
+		  }
+		  return best;
+}
+function nearestLineForStation(station){
+  const ov = STATION_LINE_OVERRIDE.get(station.key);
+  if (ov?.primary) return ov.primary; // 문자열로 반환
+  return nearestLine(station.lat, station.lon).name; // 기존 거리 기반
+}
+function computeTotals() {
+  const data = window.subwayData;
+  if (!data) return;
+
+  const ls = data.lineStops || {};
+
+  // total 세팅
+  for (const lineName of Object.keys(ls)) {
+    const arr = ls[lineName] || [];
+    lineStats[lineName] = lineStats[lineName] || { total: 0, matched: 0, color: colorMap[lineName] || "#003DA5" };
+    lineStats[lineName].total = arr.length;
+    lineStats[lineName].color = colorMap[lineName] || lineStats[lineName].color || "#003DA5";
+    if (typeof lineStats[lineName].matched !== "number") lineStats[lineName].matched = 0;
+  }
+
+  // lineStops에 없는 잔재 제거
+  for (const k of Object.keys(lineStats)) {
+    if (!(k in ls)) delete lineStats[k];
+  }
+  const uniq = new Set();
+Object.values(window.subwayData.lineStops || {}).forEach(arr => arr.forEach(k => uniq.add(k)));
+totalStationsCount = uniq.size;
+}
+
+
+    /* ------------------------------------------------ */
+    /* PC 환경: 사이드바 업데이트 함수 (기존 로직) */
+    /* ------------------------------------------------ */
+    function updateSidebar(){
+      const container=document.getElementById('lineList');
+      container.innerHTML='';
+      const entries=sortLineEntries(Object.entries(lineStats));
+      entries.forEach(([name,s])=>{
+        const div=document.createElement('div');
+        div.className='line-item';
+        // PC 사이드바에서는 발견 역 개수를 표시합니다.
+        div.innerHTML=`<div class='line-dot' style='background:${s.color}'></div><div>${name}</div><div class='count'>${s.matched} / ${s.total}</div>`;
+        container.appendChild(div);
+      });
+    }
+    
+	const MAX_DISTANCE_SQ = 0.000004; // 0.002 * 0.002 = 0.000004 (경위도 제곱 거리)
+
+    function getNearbyLines(lat, lon) {
+        const nearbyLines = new Set();
+        subwayData.lines.forEach(Ln => {
+            let isNearby = false;
+            // 노선의 모든 선분(Segments)을 확인합니다.
+            for (const seg of Ln.segs) {
+                // 선분의 모든 점을 확인합니다.
+                for (const p of seg) {
+                    const d2 = (lat - p[0]) ** 2 + (lon - p[1]) ** 2;
+                    if (d2 < MAX_DISTANCE_SQ) {
+                        nearbyLines.add(Ln.name); // 근처에 있으면 해당 노선 이름 추가
+                        isNearby = true;
+                        break; // 해당 노선은 찾았으니 다음 노선으로 넘어감
+                    }
+                }
+                if (isNearby) break;
+            }
+        });
+        return Array.from(nearbyLines);
+    }
+function nearbyLinesForStation(station){
+  const ov = STATION_LINE_OVERRIDE.get(station.key);
+  if (!ov) return getNearbyLines(station.lat, station.lon);
+
+  // primary는 무조건 포함, also는 추가
+  const base = new Set(getNearbyLines(station.lat, station.lon));
+  base.add(ov.primary);
+  (ov.also || []).forEach(x => base.add(x));
+  return [...base];
+}
+    /* ------------------------------------------------ */
+    /* 모바일 환경: 대시보드 업데이트 함수 (새로운 로직) */
+    /* ------------------------------------------------ */
+    function updateDashboard(){
+      const container=document.getElementById('lineButtons');
+      if (!container) return; // 요소가 없으면(PC 환경이면) 실행하지 않음
+
+      container.innerHTML='';
+
+      // 1. 전체 발견율 계산 및 업데이트
+      matchedStationsCount = 0;
+      Object.values(lineStats).forEach(s => { matchedStationsCount += s.matched; });
+
+      const totalRateElement = document.getElementById('totalRate');
+      const rate = totalStationsCount > 0 ? (matchedStationsCount / totalStationsCount) * 100 : 0;
+      if (totalRateElement) totalRateElement.textContent = `${rate.toFixed(1)} %`;
+
+      // 2. 노선 버튼 그룹 생성 (모바일용)
+      const entries=sortLineEntries(Object.entries(lineStats));
+
+      const mainLinesDiv = document.createElement('div');
+      mainLinesDiv.className = 'line-group main-lines';
+
+      const otherLinesDiv = document.createElement('div');
+      otherLinesDiv.className = 'line-group other-lines';
+
+      entries.forEach(([name,s])=>{
+        const btn=document.createElement('button');
+        btn.className='line-button';
+        btn.style.backgroundColor=s.color;
+
+        const isMainLine = name.match(/^(\d+)호선$/) && parseInt(name.match(/^(\d+)호선$/)[1]) <= 9;
+        
+        if (isMainLine) {
+            btn.textContent = name.replace('호선', '');
+            mainLinesDiv.appendChild(btn);
+        } else {
+            btn.textContent = name; 
+            otherLinesDiv.appendChild(btn);
+        }
+      });
+      
+      container.appendChild(mainLinesDiv);
+      container.appendChild(otherLinesDiv);
+    }
+
+    /* ------------------------------------------------ */
+    /* 통합 업데이트 함수 (환경에 따라 호출) */
+    /* ------------------------------------------------ */
+    function updateUI(){
+
+        // 화면 너비에 따라 다른 UI 업데이트 함수 호출
+		
+        if (window.innerWidth <= 768) {
+		// ✅ lineStops 기반으로 lineStats 재계산 (GTX-A 같은 수동 노선 포함)
+lineStats = lineStats || {};
+
+const d = window.subwayData;
+if (d?.lineStops) {
+  totalStationsCount = 0;
+
+  for (const [lineName, stops] of Object.entries(d.lineStops)) {
+    const total = Array.isArray(stops) ? stops.length : 0;
+
+    // 기존 색상 유지(있으면), 없으면 기본
+    const prev = lineStats[lineName] || {};
+    const color = prev.color || "#777";
+
+    // 발견 수 계산: 너 프로젝트에서 "발견됨" 판정이 뭔지 모르니
+    // 기존 prev.matched가 있으면 유지하고, 없으면 0으로 둠
+    // (발견 로직이 따로 있으면 그 로직으로 matched를 채우는 게 정답)
+    const matched = prev.matched ?? 0;
+
+    lineStats[lineName] = { total, matched, color };
+    totalStationsCount += total;
+  }
+}
+
+
+function syncLineStatsFromLineStops(){
+  const d = window.subwayData;
+  if (!d?.lineStops) return;
+
+  window.lineStats = window.lineStats || {};
+
+  for (const [lineName, stops] of Object.entries(d.lineStops)) {
+    const total = Array.isArray(stops) ? stops.length : 0;
+    lineStats[lineName] = lineStats[lineName] || { total: 0, matched: 0, color: "#777" };
+    lineStats[lineName].total = total;     // ✅ 총역수 채우기
+    // matched는 너 진행상황 계산 로직이 따로 있을 테니 여기선 건드리지 않음
+  }
+}
+syncLineStatsFromLineStops();
+
+            updateDashboard();
+        } else {
+            updateSidebar();
+        }
+    }
+function linesForStationKey(stKey) {
+  const data = window.subwayData;
+  const out = [];
+  const stops = data?.lineStops || {};
+  for (const [lineName, keys] of Object.entries(stops)) {
+    if (keys.includes(stKey)) out.push(lineName);
+  }
+  return out;
+}
+async function tryPersistStorage() {
+  if (!navigator.storage || !navigator.storage.persist) return;
+  const persisted = await navigator.storage.persisted();
+  if (!persisted) {
+    const ok = await navigator.storage.persist();
+    console.log("[storage] persist request:", ok);
+  } else {
+    console.log("[storage] already persisted");
+  }
+}
+
+    async function init(){
+	await tryPersistStorage();
+      try{
+	  // ✅ 노선도/검색 결과에서 완전히 제외할 역들 (월미바다열차)
+function excludeStationsEverywhere(names) {
+  const keys = new Set();
+    const excludeKeys = new Set(names.map(normStationKey));
+  for (const nm of names) keys.add(normStationKey(nm));
+
+  // 1) 검색 대상(=stations)에서 제거
+  window.subwayData.stations = (window.subwayData.stations || []).filter(s => !keys.has(s.key));
+
+  // 2) lineStops(노선별 정차역 목록)에서도 제거 → total/카운트 꼬임 방지
+  const ls = window.subwayData.lineStops || {};
+  for (const lineName of Object.keys(ls)) {
+    ls[lineName] = (ls[lineName] || []).filter(k => !keys.has(k));
+  }
+  window.subwayData.lineStops = ls;
+}
+const CACHE_KEY = "overpass:v8:" + bbox.join(","); // bbox 바뀌면 키도 바뀜
+const { data: raw } = await getOverpassWithCache(overpassQuery);
+window.rawOverpass = raw;
+console.log("elements:", raw.elements.length);
+
+// ✅ parseData는 한 번만
+subwayData = window.subwayData = parseData(raw);
+
+// ✅ 삭제할 역 이름은 '배열'로 따로 둔다
+const EXCLUDED_NAMES = ["월미공원", "월미문화의거리", "월미바다", "박물관", "탑승동", "제1터미널", "제2터미널", "천안아산역", "양평레일바이크종점", "총신대입구(이수)"]; 
+const excludeKeys = new Set(EXCLUDED_NAMES.map(normStationKey));
+
+// 1) stations(검색/결과)에서 제거
+window.subwayData.stations = (window.subwayData.stations || []).filter(
+  s => !excludeKeys.has(s.key)
+);
+
+// 2) lineStops(노선 총역수/카운트용)에서도 제거
+const ls = window.subwayData.lineStops || {};
+for (const lineName of Object.keys(ls)) {
+  ls[lineName] = (ls[lineName] || []).filter(k => !excludeKeys.has(k));
+}
+window.subwayData.lineStops = ls;
+
+// 전역 변수도 같은 객체로
+subwayData = window.subwayData;
+
+console.log("Parsed Data:", subwayData);
+
+if (subwayData.lines.length === 0) {
+  console.warn("노선 데이터가 없심더! BBox나 쿼리를 확인해보이소.");
+}
+
+drawLines(subwayData.lines);
+computeTotals();
+drawBaseMarkers(subwayData.stations);
+updateUI();
+
+// bounds도 동일하게
+const bounds = L.latLngBounds([]);
+subwayData.lines.forEach(Ln => Ln.segs.forEach(seg => seg.forEach(p => bounds.extend(p))));
+if (bounds.isValid()) map.fitBounds(bounds.pad(0.05));
+subwayData.lines.forEach(Ln=>Ln.segs.forEach(seg=>seg.forEach(p=>bounds.extend(p)))); 
+if(bounds.isValid())map.fitBounds(bounds.pad(0.05)); }
+catch(e){alert('초기화 오류: '+e.message);console.error(e);} }
+
+    // ********* 검색 입력 처리 로직 수정 *********
+    const inputPC = document.getElementById('stationSearchPC');
+    const inputMobile = document.getElementById('stationSearchMobile');
+function pickClosestLineNameForStation(st, lineNames) {
+  const data = window.subwayData;
+  if (!data || !Array.isArray(data.lines) || !lineNames || lineNames.length === 0) return null;
+
+  let bestName = null;
+  let bestD2 = Infinity;
+
+  for (const name of lineNames) {
+    const Ln = data.lines.find(L => L.name === name);
+    if (!Ln) continue;
+
+    for (const seg of (Ln.segs || [])) {
+      if (!Array.isArray(seg)) continue;
+      for (const p of seg) {
+        const d2 = (st.lat - p[0]) ** 2 + (st.lon - p[1]) ** 2;
+        if (d2 < bestD2) {
+          bestD2 = d2;
+          bestName = name;
+        }
+      }
+    }
+  }
+  return bestName;
+}
+
+function linesForStationResolved(st) {
+  // 1) key기반(충돌 가능)
+  const byKey = linesForStationKey(st.key);
+
+  // 2) 좌표 기반(충돌에 강함)
+  const byGeo = nearbyLinesForStation(st);
+
+  // 둘 다 있으면 교집합 우선(동명이역 분리)
+  if (byKey.length && byGeo.length) {
+    const setGeo = new Set(byGeo);
+    const inter = byKey.filter(x => setGeo.has(x));
+    if (inter.length) return inter;
+  }
+
+  // 하나만 있으면 그걸 사용
+  if (byGeo.length) return byGeo;
+  if (byKey.length) return byKey;
+
+  // 최후 수단
+  const one = nearestLineForStation(st);
+  return one ? [one] : [];
+}
+//병기역명, 부역명 리스트
+window.MANUAL_ALIAS = new Map([
+//1호선
+  [normStationKey("나사렛대"), normStationKey("쌍용")],
+  [normStationKey("서울시립대입구"), normStationKey("청량리")],
+  [normStationKey("한국건강관리협회"), normStationKey("제기동")],
+  [normStationKey("삼양그룹"), normStationKey("종로5가")],
+  [normStationKey("순천향대"), normStationKey("신창")],
+  [normStationKey("아산현충사"), normStationKey("온양온천")],
+  [normStationKey("서정대학교"), normStationKey("덕정")],
+  [normStationKey("신한대 제1캠퍼스"), normStationKey("망월사")],
+  [normStationKey("도봉구청"), normStationKey("방학")],
+  [normStationKey("동양미래대학"), normStationKey("구일")],
+  [normStationKey("가톨릭대"), normStationKey("역곡")],
+  [normStationKey("서울신대"), normStationKey("소사")],
+  [normStationKey("부천대학교"), normStationKey("부천")],
+  [normStationKey("가톨릭대 인천성모병원"), normStationKey("부평")],
+  [normStationKey("인천사랑병원"), normStationKey("주안")],
+  [normStationKey("인천대학교 제물포캠퍼스"), normStationKey("제물포")],
+  [normStationKey("민주화운동기념관"), normStationKey("남영")],
+  [normStationKey("안양예술공원"), normStationKey("관악")],
+  [normStationKey("성결대"), normStationKey("명학")],
+  [normStationKey("지샘병원"), normStationKey("군포")],
+  [normStationKey("한세대"), normStationKey("당정")],
+  [normStationKey("한국교통대"), normStationKey("의왕")],
+  [normStationKey("스타필드 수원"), normStationKey("화서")],
+  [normStationKey("국제대학"), normStationKey("서정리")],
+  [normStationKey("한경국립대"), normStationKey("평택지제")],
+  [normStationKey("남서울대"), normStationKey("성환")],
+  [normStationKey("선문대"), normStationKey("아산")],
+
+//2호선/
+  [normStationKey("하나은행"), normStationKey("을지로입구")],
+  [normStationKey("신한카드"), normStationKey("을지로3가")],
+  [normStationKey("케이뱅크"), normStationKey("을지로4가")],
+  [normStationKey("DDP"), normStationKey("동대문역사문화공원")],
+  [normStationKey("성동구청"), normStationKey("왕십리")],
+  [normStationKey("무신사"), normStationKey("성수")],
+  [normStationKey("광진구청"), normStationKey("구의")],
+  [normStationKey("동서울터미널"), normStationKey("강변")],
+  [normStationKey("수협중앙회공제보험"), normStationKey("잠실나루")],
+  [normStationKey("송파구청"), normStationKey("잠실")],
+  [normStationKey("무역센터"), normStationKey("삼성")],
+  [normStationKey("애큐온저축은행"), normStationKey("선릉")],
+  [normStationKey("센터필드"), normStationKey("역삼")],
+  [normStationKey("하루플란트치과"), normStationKey("강남")],
+  [normStationKey("법원.검찰청"), normStationKey("교대")],
+  [normStationKey("백석예술대"), normStationKey("방배")],
+  [normStationKey("강감찬"), normStationKey("낙성대")],
+  [normStationKey("관악구청"), normStationKey("서울대입구")],
+  [normStationKey("원광디지털대"), normStationKey("구로디지털단지")],
+  [normStationKey("구로구청"), normStationKey("대림")],
+  [normStationKey("김안과병원"), normStationKey("문래")],
+  [normStationKey("세아타워"), normStationKey("합정")],
+  [normStationKey("경기대입구"), normStationKey("충정로")],
+  [normStationKey("동대문구청"), normStationKey("용두")],
+//3호선/
+  [normStationKey("은평성모병원"), normStationKey("구파발")],
+  [normStationKey("정부서울청사"), normStationKey("경복궁")],
+  [normStationKey("감리교신학대학교"), normStationKey("독립문")],
+  [normStationKey("현대건설"), normStationKey("안국")],
+  [normStationKey("현대백화점"), normStationKey("압구정")],
+  [normStationKey("KCC건설"), normStationKey("신사")],
+  [normStationKey("예술의전당"), normStationKey("남부터미널")],
+  [normStationKey("서초구청"), normStationKey("양재")],
+  [normStationKey("서울주택도시개발공사"), normStationKey("대청")],
+  [normStationKey("고양아람누리"), normStationKey("정발산")],
+  [normStationKey("건강보험일산병원"), normStationKey("백석")],
+  [normStationKey("중부대학교"), normStationKey("삼송")],
+  
+ //4호선/
+  [normStationKey("강북구청"), normStationKey("수유")],
+  [normStationKey("서울사이버대학"), normStationKey("미아")],
+  [normStationKey("돈암"), normStationKey("성신여대입구")],
+  [normStationKey("삼선교"), normStationKey("한성대입구")],
+  [normStationKey("우리금융타운"), normStationKey("명동")],
+  [normStationKey("남대문시장"), normStationKey("회현")],
+  [normStationKey("갈월"), normStationKey("숙대입구")],
+  [normStationKey("전쟁기념관"), normStationKey("삼각지")],
+  [normStationKey("아모레퍼시픽"), normStationKey("신용산")],
+  [normStationKey("국립중앙박물관"), normStationKey("이촌")],
+  [normStationKey("현충원"), normStationKey("동작")],
+  [normStationKey("총신대입구"), normStationKey("이수")],
+  [normStationKey("경복대"), normStationKey("진접")],
+  [normStationKey("한림대성심병원"), normStationKey("평촌")],
+  [normStationKey("원광대산본병원"), normStationKey("산본")],
+  [normStationKey("안산대학교"), normStationKey("상록수")],
+  [normStationKey("서울예술대학교"), normStationKey("중앙역")],
+  [normStationKey("고대안산병원"), normStationKey("고잔")],
+  [normStationKey("신안산대학교"), normStationKey("초지")],
+  [normStationKey("시화병원"), normStationKey("정왕")],
+//5호선/
+  [normStationKey("홈앤쇼핑"), normStationKey("마곡")],
+  [normStationKey("에스앤유서울병원"), normStationKey("발산")],
+  [normStationKey("은행정"), normStationKey("신정")],
+  [normStationKey("목동운동장"), normStationKey("오목교")],
+  [normStationKey("신한투자증권"), normStationKey("여의도")],
+  [normStationKey("유진투자증권"), normStationKey("여의나루")],
+  [normStationKey("강북삼성병원"), normStationKey("서대문")],
+  [normStationKey("세종문화회관"), normStationKey("광화문")],
+  [normStationKey("탑골공원"), normStationKey("종로3가")],
+  [normStationKey("능동"), normStationKey("군자")],
+  [normStationKey("어린이대공원후문"), normStationKey("아차산")],
+  [normStationKey("장신대"), normStationKey("광나루")],
+  [normStationKey("풍납토성"), normStationKey("천호")],
+  [normStationKey("강동성심병원"), normStationKey("강동")],
+  [normStationKey("강동구민회관"), normStationKey("굽은다리")],
+  [normStationKey("강동경희대병원"), normStationKey("고덕")],
+  [normStationKey("덕풍.신장"), normStationKey("하남시청")],
+  [normStationKey("한국체대"), normStationKey("올림픽공원")],
+ //6호선/
+  [normStationKey("신사"), normStationKey("새절")],
+  [normStationKey("명지대"), normStationKey("증산")],
+  [normStationKey("성산"), normStationKey("월드컵경기장")],
+  [normStationKey("서강"), normStationKey("광흥창")],
+  [normStationKey("서강대앞"), normStationKey("대흥")],
+  [normStationKey("용산구청"), normStationKey("녹사평")],
+  [normStationKey("고대병원"), normStationKey("안암")],
+  [normStationKey("종암"), normStationKey("고려대")],
+  [normStationKey("동덕여대"), normStationKey("월곡")], //동덕여대 학우 동지들과 연대합니다 투쟁!
+  [normStationKey("한국과학기술연구원"), normStationKey("상월곡")],
+  [normStationKey("서울여대입구"), normStationKey("화랑대")],
+  [normStationKey("서울의료원"), normStationKey("봉화산")],
+//7호선/
+  [normStationKey("한국성서대"), normStationKey("중계")],
+  [normStationKey("을지대을지병원"), normStationKey("하계")],
+  [normStationKey("서울과학기술대"), normStationKey("공릉")],
+  [normStationKey("한국열린사이버대"), normStationKey("상봉")],
+  [normStationKey("서일대입구"), normStationKey("면목")],
+  [normStationKey("녹색병원"), normStationKey("사가정")],
+  [normStationKey("용마폭포공원"), normStationKey("용마산")],
+  [normStationKey("세종대"), normStationKey("어린이대공원")],
+  [normStationKey("뚝섬한강공원"), normStationKey("자양")],
+  [normStationKey("제일정형외과병원"), normStationKey("청담")],
+  [normStationKey("나누리병원"), normStationKey("학동")],
+  [normStationKey("유중아트센터"), normStationKey("내방")],
+  [normStationKey("살피재"), normStationKey("숭실대입구")],
+  [normStationKey("현대에이치티"), normStationKey("보라매")],
+  [normStationKey("구로구청"), normStationKey("대림")],
+  [normStationKey("마리오아울렛"), normStationKey("가산디지털단지")],
+  [normStationKey("성공회대입구"), normStationKey("온수")],
+  [normStationKey("부천아트센터"), normStationKey("부천시청")],
+  [normStationKey("거북시장"), normStationKey("석남")],
+  [normStationKey("부천우리병원"), normStationKey("부천종합운동장")],
+  [normStationKey("예손병원"), normStationKey("춘의")],
+  [normStationKey("인본병원"), normStationKey("상동")],
+  [normStationKey("한국만화박물관.웹툰융합센터"), normStationKey("삼산체육관")],
+  [normStationKey("강남콩나무병원"), normStationKey("부평구청")],
+//8호선/
+  [normStationKey("구리전통시장"), normStationKey("구리")],
+  [normStationKey("평화의문"), normStationKey("몽촌토성")],
+  [normStationKey("한솔병원"), normStationKey("석촌")],
+  [normStationKey("성남법원.검찰청"), normStationKey("남한산성입구")],
+  [normStationKey("신구대학교"), normStationKey("단대오거리")],
+//9호선/
+  [normStationKey("서울식물원"), normStationKey("마곡나루")],
+  [normStationKey("부민병원"), normStationKey("가양")],
+  [normStationKey("서울고든병원"), normStationKey("증미")],
+  [normStationKey("강서대학교"), normStationKey("등촌")],
+  [normStationKey("한국산업은행"), normStationKey("국회의사당")],
+  [normStationKey("KB금융타운"), normStationKey("샛강")],
+  [normStationKey("중앙대입구"), normStationKey("흑석")],
+//인천 1호선
+  [normStationKey("북부법원.검찰청"), normStationKey("아라")],
+  [normStationKey("재외동포청"), normStationKey("센트럴파크")],
+  [normStationKey("경인여자대학교"), normStationKey("계산")],
+  [normStationKey("상록호텔조리직업전문학교"), normStationKey("경인교대입구")],
+  [normStationKey("인천세종병원"), normStationKey("작전")],
+  [normStationKey(""), normStationKey("갈산")],
+  [normStationKey("세림병원"), normStationKey("부평구청")],
+  [normStationKey("한길안과병원"), normStationKey("부평시장")],
+  [normStationKey("연세와병원"), normStationKey("인천시청")],
+  [normStationKey("가천대 길병원"), normStationKey("예술회관")],
+  [normStationKey("푸른세상안과"), normStationKey("인천터미널")],
+  [normStationKey("그랜드오스티엄 웨딩컨벤션"), normStationKey("문학경기장")],
+  [normStationKey("가천대학교 메디컬캠퍼스"), normStationKey("신연수")],
+  [normStationKey("스퀘어원"), normStationKey("동춘")],
+  [normStationKey("저어새 생태학습관"), normStationKey("동막")],
+  [normStationKey("연세대학교"), normStationKey("캠퍼스타운")],
+  [normStationKey("현대프리미엄아울렛 송도점"), normStationKey("테크노파크")],
+  [normStationKey("송도컨벤시아"), normStationKey("인천대입구")],
+  [normStationKey("센트로드"), normStationKey("국제업무지구")],
+//인천 2호선/
+  [normStationKey("검단산업단지"), normStationKey("검단오류")],
+  [normStationKey("공촌사거리"), normStationKey("아시아드경기장")],
+  [normStationKey("인천J밸리"), normStationKey("주안국가산단")],
+  [normStationKey("문화창작지대"), normStationKey("시민공원")],
+  [normStationKey("서창"), normStationKey("운연")],
+  [normStationKey("왕길역 로열파크씨티"), normStationKey("왕길")],
+  [normStationKey("검단수한방병원"), normStationKey("검단사거리")],
+  [normStationKey("검단탑종합병원"), normStationKey("완정")],
+  [normStationKey("로열파크씨티"), normStationKey("독정")],
+  [normStationKey("가톨릭관동대학교 국제성모병원"), normStationKey("서구청")],
+  [normStationKey("닥터에버스의원 청라점"), normStationKey("가정")],
+  [normStationKey("인천참사랑병원"), normStationKey("가정중앙시장")],
+  [normStationKey("그린산부인과"), normStationKey("서부여성회관")],
+  [normStationKey("나은병원"), normStationKey("인천가좌")],
+  [normStationKey("뉴욕치과의원"), normStationKey("석천사거리")],
+  [normStationKey("서울바른척도병원"), normStationKey("모래내시장")],
+  [normStationKey("인천도시공사"), normStationKey("남동구청")],
+//신분당선/
+  [normStationKey("매헌"), normStationKey("양재시민의숲")],
+  [normStationKey("판교테크노밸리"), normStationKey("판교")],
+  [normStationKey("분당서울대병원"), normStationKey("미금")],
+  [normStationKey("아주대"), normStationKey("광교중앙")],
+  [normStationKey("경기대"), normStationKey("광교")],
+//용인경전철
+  [normStationKey("백남준아트센터"), normStationKey("기흥")],
+  [normStationKey("용인미르스타디움"), normStationKey("삼가")],
+  [normStationKey("용인예술과학대"), normStationKey("용인중앙시장")],
+  [normStationKey("용인세브란스병원"), normStationKey("동백")],
+//우이신설선
+  [normStationKey("도선사입구"), normStationKey("북한산우이")],
+  [normStationKey("덕성여대"), normStationKey("4.19민주묘지")],
+  [normStationKey("서경대"), normStationKey("북한산보국문")],
+  [normStationKey("국민대"), normStationKey("정릉")],
+//신림선, 김포골드라인
+  [normStationKey("성애병원"), normStationKey("대방")],
+  [normStationKey("전문건설회관"), normStationKey("보라매병원")],
+  [normStationKey("서울대"), normStationKey("관악산")],
+  [normStationKey("김포시청"), normStationKey("사우")],
+//경강선
+  [normStationKey("동원대"), normStationKey("곤지암")],
+  [normStationKey("한국관광대"), normStationKey("신둔도예촌")],
+  [normStationKey("여주대"), normStationKey("여주")],
+//경의중앙선
+  [normStationKey("두원공과대학교"), normStationKey("파주")],
+  [normStationKey("서영대학교"), normStationKey("월롱")],
+  [normStationKey("삼육대학교"), normStationKey("별내")],
+  [normStationKey("엘리시안강촌"), normStationKey("백양리")],
+  [normStationKey("강원대"), normStationKey("남춘천")],
+  [normStationKey("한림대"), normStationKey("춘천")],
+ //수인분당선
+  [normStationKey("에스엠타운"), normStationKey("서울숲")],
+  [normStationKey("동서울대학교"), normStationKey("복정")],
+  [normStationKey("성남아트센터"), normStationKey("이매")],
+  [normStationKey("단국대"), normStationKey("죽전")],
+  [normStationKey("루터대학교"), normStationKey("상갈")],
+  [normStationKey("경희대"), normStationKey("영통")],
+  [normStationKey("경기아트센터"), normStationKey("수원시청")],
+  [normStationKey("수원여대"), normStationKey("오목천")],
+  [normStationKey("인하대병원"), normStationKey("숭의")],
+  [normStationKey("부천대 소사캠퍼스"), normStationKey("소새울역")],
+  [normStationKey("한도병원"), normStationKey("선부")],
+//의정부경전철
+  [normStationKey("용현산업단지"), normStationKey("어룡")],
+//인천국제공항철도
+  [normStationKey("한국환경공단"), normStationKey("검암")],
+  [normStationKey("하나금융타운"), normStationKey("청라국제도시")],
+]);
+function escapehtml(s){
+  return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function getAltNameForStation(st){
+  // 프로젝트마다 다르니, 너가 실제로 쓰는 필드명으로 1개만 남기면 됨.
+  return st.altName || st.alias || st._aliasText || st.oneAliasKey || "";
+}
+
+function buildStationLabelHTML(st){
+  const alt = st._altText || "";
+  if (!alt || hideAltName) return escapehtml(st.name);
+  // 줄바꿈 표기(Leaflet tooltip은 HTML을 그대로 렌더링함)
+  return `<div style="text-align:center;">${escapehtml(st.name)}</div><span class="alt-name">(${escapehtml(alt)})</span>`;
+}
+function refreshAllLabels(){
+  for (const v of shownStations.values()){
+    if (v.tooltip && v.st) v.tooltip.setContent(buildStationLabelHTML(v.st));
+  }
+}
+
+function applyManualAlias(userText) {
+  const k = normStationKey((userText || "").replace(/\./g,'·'));
+  return window.MANUAL_ALIAS.get(k) || k;
+}
+
+const searchHandler = (e, inputElement) => {
+  if (e.key !== 'Enter') return;
+
+  const data = window.subwayData;
+  if (!data || !Array.isArray(data.stations)) {
+    alert("데이터가 아직 로드되지 않았습니다.");
+    return;
+  }
+
+const userTextRaw = (inputElement.value || "").trim();
+const userKey = normStationKey(userTextRaw.replace(/\./g,'·')); // 사용자가 친 걸 정규화
+const key = applyManualAlias(userTextRaw);                      // 대표역 key로 resolve
+if (!key) return;
+
+function buildReverseAliasMap(aliasMap) {
+  const rev = new Map(); // canonicalKey -> Set(aliasText)
+  for (const [aliasKey, canonicalKey] of aliasMap.entries()) {
+    if (!rev.has(canonicalKey)) rev.set(canonicalKey, new Set());
+    // aliasKey는 정규화 key라 예쁘게 보이진 않으니, "표시용 문자열"을 따로 넣고 싶으면 아래 방법 2가 더 좋음
+    rev.get(canonicalKey).add(aliasKey);
+  }
+  return rev;
+}
+
+
+const foundList = data.stations.filter(s => normStationKey(s.key || s.name || "") === key);
+  if (foundList.length === 0) {
+    alert("정확히 일치하는 역명을 찾을 수 없습니다.");
+    return;
+  }
+
+  const center = map.getCenter();
+
+  const targets = foundList
+    .filter(s => typeof s.lat !== 'undefined' && s.lat !== null)
+    .map(s => ({ s, d2: (s.lat - center.lat)**2 + (s.lon - center.lng)**2 }))
+    .sort((a, b) => a.d2 - b.d2)
+    .map(x => x.s);
+
+  if (targets.length === 0) return;
+
+  for (const st of targets) {
+  // ✅ 사용자가 별칭으로 입력한 경우에만 병기 표기
+  const REVERSE_ALIAS = buildReverseAliasMap(window.MANUAL_ALIAS);
+
+const aliases = REVERSE_ALIAS.get(st.key);
+const oneAliasKey = aliases ? [...aliases][0] : "";
+const label = oneAliasKey ? `<div style="text-align:center;">${st.name}</div>(${escapehtml(oneAliasKey)})` : st.name;
+
+const stationId = `${st.key}@${st.lat.toFixed(6)},${st.lon.toFixed(6)}`;
+if (shownStations.has(stationId)) continue;	
+
+	let connectingLines = linesForStationResolved(st);
+
+// primary(색상용) 라인은 “후보 중 실제로 가장 가까운 노선”
+const primaryName = pickClosestLineNameForStation(st, connectingLines);
+
+// primary 라인 색을 우선 사용, 없으면 기존 nearestLine
+const primaryObj = primaryName ? data.lines.find(L => L.name === primaryName) : null;
+const fallbackNearest = nearestLine(st.lat, st.lon);
+const markerColor = primaryObj?.color || colorMap[primaryName] || fallbackNearest.color;
+
+// 아이콘에 markerColor 적용
+const icon = L.divIcon({
+  className: '',
+  html: `<div class='station-icon' style='background-color:${markerColor}; border: 2px solid #fff; width:14px; height:14px;'></div>`,
+  iconSize: [14, 14],
+  iconAnchor: [7, 7]
+});
+
+
+    const marker = L.marker([st.lat, st.lon], { icon, zIndexOffset: 1000 }).addTo(map);
+	st._altText = oneAliasKey || "";   // ✅ 토글용으로 저장
+
+const tooltip = L.tooltip({ permanent: true, direction: 'top', className: 'label-text' })
+  .setLatLng([st.lat, st.lon])
+  .setContent(buildStationLabelHTML(st))
+  .addTo(map);
+shownStations.set(stationId, { marker, tooltip, st });
+
+if (connectingLines.length === 0) {
+  connectingLines = nearbyLinesForStation(st); // 이미 만들어둔 함수
+}
+
+// ✅ 그래도 없으면 최후: nearest 1개만
+if (connectingLines.length === 0) {
+  const one = nearestLineForStation(st);
+  if (one) connectingLines = [one];
+}
+
+// (선택) 디버그: 어떤 역이 lineStops에 없었는지 로그
+if (!linesForStationKey(st.key).length) {
+  console.warn("[lineStops miss]", st.name, st.key, "fallback:", connectingLines);
+}
+
+for (const name of connectingLines) {
+  if (!name) continue;
+  lineStats[name] = lineStats[name] || { total: 0, matched: 0, color: colorMap[name] || '#003DA5' };
+  lineStats[name].matched += 1;
+}
+  }
+
+  updateUI();
+
+  inputElement.value = '';
+  map.panTo([targets[0].lat, targets[0].lon]);
+};
+    if (inputPC) inputPC.addEventListener('keypress', e => searchHandler(e, inputPC));
+    if (inputMobile) inputMobile.addEventListener('keypress', e => searchHandler(e, inputMobile));
+    
+    // 화면 크기 변경 시 UI 업데이트 (PC-모바일 전환 시)
+    window.addEventListener('resize', updateUI);
+
+    init();
+
+
+
+function setMenuText(btn){
+  if (!btn) return;
+  btn.textContent = hideAltName ? "부역명/병기역명 표시" : "부역명/병기역명 숨기기";
+}
+
+function bindOptionsMenu(btnId, menuId, toggleBtnId) {
+  const btn = document.getElementById(btnId);
+  const menu = document.getElementById(menuId);
+  const toggleBtn = document.getElementById(toggleBtnId);
+  if (!btn || !menu || !toggleBtn) return;
+
+  setMenuText(toggleBtn);
+
+  const close = () => { menu.hidden = true; };
+
+  const openOrClose = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    menu.hidden = !menu.hidden;
+  };
+
+  // ✅ 모바일에서 확실히: touchstart + click 둘 다
+  btn.addEventListener("touchstart", openOrClose, { passive: false });
+  btn.addEventListener("click", openOrClose);
+
+  menu.addEventListener("click", (e) => e.stopPropagation());
+  document.addEventListener("click", close);
+
+  toggleBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    hideAltName = !hideAltName;
+    localStorage.setItem(SETTINGS_KEY, hideAltName ? "1" : "0");
+    setMenuText(toggleBtn);
+    refreshAllLabels();     // ✅ 실시간 반영
+    close();
+  });
+}
+
+bindOptionsMenu("optionsBtnPC", "optionsMenuPC", "toggleAltNameBtnPC");
+bindOptionsMenu("optionsBtnMobile", "optionsMenuMobile", "toggleAltNameBtnMobile");
+
+  </script>
+</body>
+</html>
