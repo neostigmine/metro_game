@@ -142,7 +142,13 @@ body {
   padding: 8px;
   z-index: 20000; /* 메뉴는 해당 UI 안에서 최상단 */
 }
-
+.options-item-btn.danger{
+  color: #b00020;
+  font-weight: 700;
+}
+.options-item-btn.danger:hover{
+  background: rgba(176,0,32,.08);
+}
 .options-item-btn{
   width: 100%;
   text-align: left;
@@ -258,6 +264,9 @@ body {
         <button class="options-item-btn" id="toggleAltNameBtnPC" type="button">
           부역명/병기역명 표시
         </button>
+	  <button class="options-item-btn danger" id="resetCacheBtnPC" type="button">
+    캐시 초기화
+  </button>
       </div>
     </div>
   </div>
@@ -285,6 +294,10 @@ body {
         <button class="options-item-btn" id="toggleAltNameBtnMobile" type="button">
           부역명/병기역명 표시
         </button>
+	  <button class="options-item-btn danger" id="resetCacheBtnMobile" type="button">
+    캐시 초기화
+  </button>
+</div>
       </div>
     </div>
   </div>
@@ -497,7 +510,7 @@ async function getOverpassWithCache(overpassQuery) {
   // B) fetch: fresh는 여기서만 채운다 (선언을 먼저!)
   let fresh = null;
   try {
-    fresh = await fetchOverpassCached(overpassQuery); // 네 fetch 함수명으로
+    fresh = await fetchOverpass(overpassQuery); // 네 fetch 함수명으로
   } catch (e) {
     console.error("[Overpass] fetch failed", e);
     throw e; // fetch 실패는 진짜 실패니까 올려버리는 게 맞음
@@ -517,12 +530,19 @@ async function getOverpassWithCache(overpassQuery) {
 
 
 // (선택) 콘솔에서 캐시 삭제: await window.clearOverpassCache()
-window.clearOverpassCache = async () => {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.deleteDatabase(OVERPASS_CACHE_DB);
+window.clearOverpassCache = async function deleteOverpassDB() {
+  return await new Promise((resolve, reject) => {
+    const req = indexedDB.deleteDatabase("subway-overpass-cache-v1");
+
+    req.onblocked = () => {
+      console.warn("[cache] delete blocked: 다른 탭/연결이 DB를 잡고 있음. 모든 탭을 닫고 다시 시도.");
+      // 여기서 사용자에게 안내해도 좋음
+    };
+
     req.onsuccess = () => resolve(true);
     req.onerror = () => reject(req.error);
   });
+
 };
 
 	
@@ -539,6 +559,24 @@ window.clearOverpassCache = async () => {
       }
     } catch {}
   }
+  async function fetchOverpassJSON(url, options) {
+  const resp = await fetch(url, options);
+  const text = await resp.text();
+
+  if (!resp.ok) {
+    console.warn("[Overpass] HTTP", resp.status, text.slice(0, 120));
+    throw new Error("Overpass HTTP " + resp.status);
+  }
+
+  const t = text.trimStart();
+  if (!(t.startsWith("{") || t.startsWith("["))) {
+    console.warn("[Overpass] Non-JSON response head:", t.slice(0, 120));
+    throw new Error("Overpass returned non-JSON");
+  }
+
+  return JSON.parse(text);
+}
+
 
   const data = await fetchOverpass(query); // 기존 함수 그대로 사용
   try {
@@ -1024,6 +1062,67 @@ let hideAltName = (localStorage.getItem(SETTINGS_KEY) === "1");
     const shownStations=new Map();
     let totalStationsCount = 0;
     let matchedStationsCount = 0;
+	
+	const PROGRESS_KEY = "metro_progress_v1";
+let foundStationIds = new Set(); // stationId 문자열 집합
+
+function makeStationId(st){
+  return `${st.key}@${st.lat.toFixed(6)},${st.lon.toFixed(6)}`;
+}
+
+function loadProgress(){
+  try{
+    const raw = localStorage.getItem(PROGRESS_KEY);
+    if (!raw) return;
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) foundStationIds = new Set(arr);
+  }catch(e){
+    console.warn("[progress] load failed", e);
+  }
+}
+
+function saveProgress(){
+  try{
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify([...foundStationIds]));
+  }catch(e){
+    console.warn("[progress] save failed", e);
+  }
+}
+
+// lineStops(노선별 정차역 key 목록) 기준으로 matched 재계산
+function recomputeMatchedFromProgress(){
+  const d = window.subwayData;
+  if (!d || !d.lineStops) return;
+
+  // 발견한 역들의 key 집합
+  const foundKeys = new Set();
+  for (const id of foundStationIds){
+    const k = (id.split("@")[0] || "").trim();
+    if (k) foundKeys.add(k);
+  }
+
+  // lineStops 기준으로 노선별 matched 재계산
+  for (const [lineName, keys] of Object.entries(d.lineStops || {})) {
+    const arr = Array.isArray(keys) ? keys : [];
+    let m = 0;
+    for (const k of arr) if (foundKeys.has(k)) m++;
+
+    lineStats[lineName] = lineStats[lineName] || { total: 0, matched: 0, color: colorMap[lineName] || "#003DA5" };
+    lineStats[lineName].matched = m;
+  }
+
+  // lineStops에 없는 잔재 제거(안전)
+  for (const k of Object.keys(lineStats)) {
+    if (!(k in (d.lineStops || {}))) delete lineStats[k];
+  }
+}
+
+  // 1) 발견된 "역 key" 집합 만들기 (동명이역 분리 ID로 저장했지만, 노선 매칭은 key 기준이 편함)
+  const foundKeys = new Set();
+  for (const id of foundStationIds){
+    const key = id.split("@")[0];
+    if (key) foundKeys.add(key);
+  }
 window.lineStats = window.lineStats || {};
     function drawLines(lines){
       lines.forEach(Ln=>{
@@ -1187,7 +1286,7 @@ function nearbyLinesForStation(station){
 		
         if (window.innerWidth <= 768) {
 		// ✅ lineStops 기반으로 lineStats 재계산 (GTX-A 같은 수동 노선 포함)
-lineStats = lineStats || {};
+// ✅ lineStops 기반으로 lineStats 재계산 (GTX-A 같은 수동 노선 포함)
 
 const d = window.subwayData;
 if (d?.lineStops) {
@@ -1196,13 +1295,9 @@ if (d?.lineStops) {
   for (const [lineName, stops] of Object.entries(d.lineStops)) {
     const total = Array.isArray(stops) ? stops.length : 0;
 
-    // 기존 색상 유지(있으면), 없으면 기본
     const prev = lineStats[lineName] || {};
     const color = prev.color || "#777";
 
-    // 발견 수 계산: 너 프로젝트에서 "발견됨" 판정이 뭔지 모르니
-    // 기존 prev.matched가 있으면 유지하고, 없으면 0으로 둠
-    // (발견 로직이 따로 있으면 그 로직으로 matched를 채우는 게 정답)
     const matched = prev.matched ?? 0;
 
     lineStats[lineName] = { total, matched, color };
@@ -1211,11 +1306,11 @@ if (d?.lineStops) {
 }
 
 
+
 function syncLineStatsFromLineStops(){
   const d = window.subwayData;
   if (!d?.lineStops) return;
 
-  window.lineStats = window.lineStats || {};
 
   for (const [lineName, stops] of Object.entries(d.lineStops)) {
     const total = Array.isArray(stops) ? stops.length : 0;
@@ -1250,6 +1345,30 @@ async function tryPersistStorage() {
     console.log("[storage] already persisted");
   }
 }
+function fillLineStopsByProximityFor(lineName, maxD2 = 0.000002) {
+  const d = window.subwayData;
+  if (!d?.lines || !d?.stations || !d?.lineStops) return;
+
+  const Ln = d.lines.find(x => x.name === lineName);
+  if (!Ln) { console.warn("[fill] no such line:", lineName); return; }
+
+  const set = new Set(d.lineStops[lineName] || []);
+  for (const st of d.stations) {
+    let best = Infinity;
+    for (const seg of (Ln.segs || [])) {
+      if (!Array.isArray(seg)) continue;
+      for (const p of seg) {
+        const d2 = (st.lat - p[0])**2 + (st.lon - p[1])**2;
+        if (d2 < best) best = d2;
+      }
+    }
+    if (best < maxD2) set.add(st.key);
+  }
+  d.lineStops[lineName] = [...set];
+  console.log("[fill lineStops]", lineName, "=>", d.lineStops[lineName].length);
+}
+
+
 
     async function init(){
 	await tryPersistStorage();
@@ -1277,6 +1396,8 @@ console.log("elements:", raw.elements.length);
 
 // ✅ parseData는 한 번만
 subwayData = window.subwayData = parseData(raw);
+loadProgress();
+recomputeMatchedFromProgress();
 
 // ✅ 삭제할 역 이름은 '배열'로 따로 둔다
 const EXCLUDED_NAMES = ["월미공원", "월미문화의거리", "월미바다", "박물관", "탑승동", "제1터미널", "제2터미널", "천안아산역", "양평레일바이크종점", "총신대입구(이수)"]; 
@@ -1304,8 +1425,10 @@ if (subwayData.lines.length === 0) {
 }
 
 drawLines(subwayData.lines);
+fillLineStopsByProximityFor("1호선");
 computeTotals();
 drawBaseMarkers(subwayData.stations);
+restoreFoundMarkersFromProgress();
 updateUI();
 
 // bounds도 동일하게
@@ -1640,6 +1763,61 @@ function applyManualAlias(userText) {
   const k = normStationKey((userText || "").replace(/\./g,'·'));
   return window.MANUAL_ALIAS.get(k) || k;
 }
+function addFoundStationMarker(st, aliasKeyForThisInput = "") {
+  const data = window.subwayData;
+  if (!data) return;
+
+  const stationId = makeStationId(st);
+  if (shownStations.has(stationId)) return; // 이미 그려져있으면 스킵
+
+  // 연결 노선 계산
+  let connectingLines = linesForStationResolved(st);
+  const primaryName = pickClosestLineNameForStation(st, connectingLines);
+  const primaryObj = primaryName ? data.lines.find(L => L.name === primaryName) : null;
+
+  const fallbackNearest = nearestLine(st.lat, st.lon);
+  const markerColor = primaryObj?.color || colorMap[primaryName] || fallbackNearest.color;
+
+  const icon = L.divIcon({
+    className: '',
+    html: `<div class='station-icon' style='background-color:${markerColor}; border: 2px solid #fff; width:14px; height:14px;'></div>`,
+    iconSize: [14, 14],
+    iconAnchor: [7, 7]
+  });
+
+  const marker = L.marker([st.lat, st.lon], { icon, zIndexOffset: 1000 }).addTo(map);
+
+  // 리로드 복원은 “사용자 입력 별칭”이 없으니 alt는 보통 빈 값
+  st._altText = aliasKeyForThisInput || st._altText || "";
+
+  const tooltip = L.tooltip({ permanent: true, direction: 'top', className: 'label-text' })
+    .setLatLng([st.lat, st.lon])
+    .setContent(buildStationLabelHTML(st))
+    .addTo(map);
+
+  shownStations.set(stationId, { marker, tooltip, st });
+}
+
+// 리로드 시 progress(foundStationIds)로 마커/라벨 복원
+function restoreFoundMarkersFromProgress() {
+  const data = window.subwayData;
+  if (!data?.stations || !foundStationIds?.size) return;
+
+  // stations를 stationId로 빠르게 찾기 위한 인덱스
+  const byId = new Map();
+  for (const st of data.stations) byId.set(makeStationId(st), st);
+
+  let restored = 0;
+  for (const id of foundStationIds) {
+    const st = byId.get(id);
+    if (!st) continue; // 데이터가 바뀌었거나(Overpass/병합 변경) 좌표가 달라졌을 수 있음
+    addFoundStationMarker(st, ""); // 별칭 없음
+    restored++;
+  }
+  console.log("[restore] found markers:", restored, "/", foundStationIds.size);
+
+  refreshAllLabels();
+}
 
 const searchHandler = (e, inputElement) => {
   if (e.key !== 'Enter') return;
@@ -1692,7 +1870,9 @@ const label = oneAliasKey ? `<div style="text-align:center;">${st.name}</div>(${
 
 const stationId = `${st.key}@${st.lat.toFixed(6)},${st.lon.toFixed(6)}`;
 if (shownStations.has(stationId)) continue;	
-
+const firstTime = !foundStationIds.has(stationId);
+foundStationIds.add(stationId);
+if (firstTime) saveProgress();
 	let connectingLines = linesForStationResolved(st);
 
 // primary(색상용) 라인은 “후보 중 실제로 가장 가까운 노선”
@@ -1736,14 +1916,10 @@ if (!linesForStationKey(st.key).length) {
   console.warn("[lineStops miss]", st.name, st.key, "fallback:", connectingLines);
 }
 
-for (const name of connectingLines) {
-  if (!name) continue;
-  lineStats[name] = lineStats[name] || { total: 0, matched: 0, color: colorMap[name] || '#003DA5' };
-  lineStats[name].matched += 1;
-}
-  }
 
-  updateUI();
+}
+recomputeMatchedFromProgress();
+updateUI();
 
   inputElement.value = '';
   map.panTo([targets[0].lat, targets[0].lon]);
@@ -1796,6 +1972,115 @@ function bindOptionsMenu(btnId, menuId, toggleBtnId) {
     close();
   });
 }
+async function clearAllOverpassCaches() {
+  // 1) IndexedDB 캐시(DB 통째 삭제)
+  try {
+    if (typeof window.clearOverpassCache === "function") {
+      await window.clearOverpassCache();
+    } else { await (async function deleteOverpassDB() {
+    return await new Promise((resolve, reject) => {
+      const req = indexedDB.deleteDatabase("subway-overpass-cache-v1");
+      req.onblocked = () => console.warn("[cache] delete blocked");
+      req.onsuccess = () => resolve(true);
+      req.onerror = () => reject(req.error);
+    });
+  })();
+    }
+  } catch (e) {
+    console.warn("[cache] indexeddb clear failed", e);
+  }
+
+  // 2) localStorage에 남은 캐시(있으면) 제거
+  try {
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      // 네가 쓰는 패턴들: "overpass:v8:..." / "overpass:v8:bbox..." 등
+if (k.startsWith("overpass:")) keysToRemove.push(k);
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
+  } catch (e) {
+    console.warn("[cache] localStorage clear failed", e);
+  }
+}
+async function clearIDBStore(dbName, storeName) {
+  return await new Promise((resolve, reject) => {
+    const openReq = indexedDB.open(dbName);
+    openReq.onerror = () => reject(openReq.error);
+
+    openReq.onsuccess = () => {
+      const db = openReq.result;
+
+      if (!db.objectStoreNames.contains(storeName)) {
+        db.close();
+        resolve({ ok: false, reason: "store_not_found" });
+        return;
+      }
+
+      const tx = db.transaction(storeName, "readwrite");
+      const store = tx.objectStore(storeName);
+      const req = store.clear();
+
+      req.onerror = () => reject(req.error);
+      tx.oncomplete = () => { db.close(); resolve({ ok: true }); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    };
+  });
+}
+
+function clearLocalStorageOverpassKeys() {
+  const rm = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k) continue;
+    if (k.startsWith("overpass:") || k.startsWith("overpass:v8:")) rm.push(k);
+  }
+  rm.forEach(k => localStorage.removeItem(k));
+  console.log("[localStorage] removed:", rm.length, rm.slice(0, 5));
+  return rm.length;
+}
+
+async function resetOverpassCacheHard() {
+  // 1) IndexedDB DB 통째 삭제 (가장 확실)
+  await window.clearOverpassCache(); // deleteDatabase 사용
+
+  // 2) localStorage 키 제거
+  clearLocalStorageOverpassKeys();
+}
+
+function bindResetCacheButton(btnId, menuId) {
+  const btn = document.getElementById(btnId);
+  const menu = document.getElementById(menuId);
+  if (!btn) return;
+
+  const handler = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const ok = confirm("Overpass 캐시를 삭제하고 새로고침할까요?");
+    if (!ok) return;
+
+    btn.disabled = true;
+    btn.textContent = "초기화 중...";
+
+await resetOverpassCacheHard();
+location.reload();
+    // 메뉴 닫기
+    if (menu) menu.hidden = true;
+await resetOverpassCacheHard();
+  localStorage.removeItem(PROGRESS_KEY);
+    // 새로고침(캐시 삭제 후 다시 받아오게)
+    location.reload();
+  };
+
+  // ✅ 모바일 확실히: touchstart + click 둘 다
+  btn.addEventListener("touchstart", handler, { passive: false });
+  btn.addEventListener("click", handler);
+}
+
+bindResetCacheButton("resetCacheBtnPC", "optionsMenuPC");
+bindResetCacheButton("resetCacheBtnMobile", "optionsMenuMobile");
 
 bindOptionsMenu("optionsBtnPC", "optionsMenuPC", "toggleAltNameBtnPC");
 bindOptionsMenu("optionsBtnMobile", "optionsMenuMobile", "toggleAltNameBtnMobile");
