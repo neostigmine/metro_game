@@ -142,7 +142,13 @@ body {
   padding: 8px;
   z-index: 20000; /* 메뉴는 해당 UI 안에서 최상단 */
 }
-
+.options-item-btn.danger{
+  color: #b00020;
+  font-weight: 700;
+}
+.options-item-btn.danger:hover{
+  background: rgba(176,0,32,.08);
+}
 .options-item-btn{
   width: 100%;
   text-align: left;
@@ -258,6 +264,9 @@ body {
         <button class="options-item-btn" id="toggleAltNameBtnPC" type="button">
           부역명/병기역명 표시
         </button>
+			  <button class="options-item-btn danger" id="resetCacheBtnPC" type="button">
+    캐시 초기화
+  </button>
       </div>
     </div>
   </div>
@@ -285,6 +294,11 @@ body {
         <button class="options-item-btn" id="toggleAltNameBtnMobile" type="button">
           부역명/병기역명 표시
         </button>
+		        </button>
+	  <button class="options-item-btn danger" id="resetCacheBtnMobile" type="button">
+    캐시 초기화
+  </button>
+</div>
       </div>
     </div>
   </div>
@@ -465,7 +479,23 @@ async function getOverpassWithCache(overpassQuery) {
   } catch (e) {
     console.warn("[Overpass cache] read failed -> no-cache mode", e);
   }
+  async function fetchOverpassJSON(url, options) {
+  const resp = await fetch(url, options);
+  const text = await resp.text();
 
+  if (!resp.ok) {
+    console.warn("[Overpass] HTTP", resp.status, text.slice(0, 120));
+    throw new Error("Overpass HTTP " + resp.status);
+  }
+
+  const t = text.trimStart();
+  if (!(t.startsWith("{") || t.startsWith("["))) {
+    console.warn("[Overpass] Non-JSON response head:", t.slice(0, 120));
+    throw new Error("Overpass returned non-JSON");
+  }
+
+  return JSON.parse(text);
+}
   // B) fetch: fresh는 여기서만 채운다 (선언을 먼저!)
   let fresh = null;
   try {
@@ -489,12 +519,19 @@ async function getOverpassWithCache(overpassQuery) {
 
 
 // (선택) 콘솔에서 캐시 삭제: await window.clearOverpassCache()
-window.clearOverpassCache = async () => {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.deleteDatabase(OVERPASS_CACHE_DB);
+window.clearOverpassCache = async function deleteOverpassDB() {
+  return await new Promise((resolve, reject) => {
+    const req = indexedDB.deleteDatabase("subway-overpass-cache-v1");
+
+    req.onblocked = () => {
+      console.warn("[cache] delete blocked: 다른 탭/연결이 DB를 잡고 있음. 모든 탭을 닫고 다시 시도.");
+      // 여기서 사용자에게 안내해도 좋음
+    };
+
     req.onsuccess = () => resolve(true);
     req.onerror = () => reject(req.error);
   });
+
 };
 
 	
@@ -1590,6 +1627,115 @@ function bindOptionsMenu(btnId, menuId, toggleBtnId) {
     close();
   });
 }
+async function clearAllOverpassCaches() {
+  // 1) IndexedDB 캐시(DB 통째 삭제)
+  try {
+    if (typeof window.clearOverpassCache === "function") {
+      await window.clearOverpassCache();
+    } else { await (async function deleteOverpassDB() {
+    return await new Promise((resolve, reject) => {
+      const req = indexedDB.deleteDatabase("subway-overpass-cache-v1");
+      req.onblocked = () => console.warn("[cache] delete blocked");
+      req.onsuccess = () => resolve(true);
+      req.onerror = () => reject(req.error);
+    });
+  })();
+    }
+  } catch (e) {
+    console.warn("[cache] indexeddb clear failed", e);
+  }
+
+  // 2) localStorage에 남은 캐시(있으면) 제거
+  try {
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      // 네가 쓰는 패턴들: "overpass:v8:..." / "overpass:v8:bbox..." 등
+if (k.startsWith("overpass:")) keysToRemove.push(k);
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
+  } catch (e) {
+    console.warn("[cache] localStorage clear failed", e);
+  }
+}
+async function clearIDBStore(dbName, storeName) {
+  return await new Promise((resolve, reject) => {
+    const openReq = indexedDB.open(dbName);
+    openReq.onerror = () => reject(openReq.error);
+
+    openReq.onsuccess = () => {
+      const db = openReq.result;
+
+      if (!db.objectStoreNames.contains(storeName)) {
+        db.close();
+        resolve({ ok: false, reason: "store_not_found" });
+        return;
+      }
+
+      const tx = db.transaction(storeName, "readwrite");
+      const store = tx.objectStore(storeName);
+      const req = store.clear();
+
+      req.onerror = () => reject(req.error);
+      tx.oncomplete = () => { db.close(); resolve({ ok: true }); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    };
+  });
+}
+
+function clearLocalStorageOverpassKeys() {
+  const rm = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k) continue;
+    if (k.startsWith("overpass:") || k.startsWith("overpass:v8:")) rm.push(k);
+  }
+  rm.forEach(k => localStorage.removeItem(k));
+  console.log("[localStorage] removed:", rm.length, rm.slice(0, 5));
+  return rm.length;
+}
+
+async function resetOverpassCacheHard() {
+  // 1) IndexedDB DB 통째 삭제 (가장 확실)
+  await window.clearOverpassCache(); // deleteDatabase 사용
+
+  // 2) localStorage 키 제거
+  clearLocalStorageOverpassKeys();
+}
+
+function bindResetCacheButton(btnId, menuId) {
+  const btn = document.getElementById(btnId);
+  const menu = document.getElementById(menuId);
+  if (!btn) return;
+
+  const handler = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const ok = confirm("Overpass 캐시를 삭제하고 새로고침할까요?");
+    if (!ok) return;
+
+    btn.disabled = true;
+    btn.textContent = "초기화 중...";
+
+await resetOverpassCacheHard();
+location.reload();
+    // 메뉴 닫기
+    if (menu) menu.hidden = true;
+await resetOverpassCacheHard();
+  localStorage.removeItem(PROGRESS_KEY);
+    // 새로고침(캐시 삭제 후 다시 받아오게)
+    location.reload();
+  };
+
+  // ✅ 모바일 확실히: touchstart + click 둘 다
+  btn.addEventListener("touchstart", handler, { passive: false });
+  btn.addEventListener("click", handler);
+}
+
+bindResetCacheButton("resetCacheBtnPC", "optionsMenuPC");
+bindResetCacheButton("resetCacheBtnMobile", "optionsMenuMobile");
 
 bindOptionsMenu("optionsBtnPC", "optionsMenuPC", "toggleAltNameBtnPC");
 bindOptionsMenu("optionsBtnMobile", "optionsMenuMobile", "toggleAltNameBtnMobile");
