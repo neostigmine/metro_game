@@ -1739,6 +1739,10 @@ window.MANUAL_ALIAS = new Map([
   [normStationKey("한국환경공단"), normStationKey("검암")],
   [normStationKey("하나금융타운"), normStationKey("청라국제도시")],
 ]);
+
+const MULTI_ALIAS = new Map([
+  [normStationKey("신사"), [normStationKey("신사"), normStationKey("새절")]],
+]);
 function escapehtml(s){
   return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
@@ -1830,8 +1834,15 @@ const searchHandler = (e, inputElement) => {
 
 const userTextRaw = (inputElement.value || "").trim();
 const userKey = normStationKey(userTextRaw.replace(/\./g,'·')); // 사용자가 친 걸 정규화
-const key = applyManualAlias(userTextRaw);                      // 대표역 key로 resolve
-if (!key) return;
+let keys = null;
+if (userKey === normStationKey("신사")) {
+  // 신사 입력 시: 신사역(3/신분당) + 새절역(6) 둘 다 처리
+  keys = [normStationKey("신사"), normStationKey("새절")];
+} else {
+  const k = applyManualAlias(userTextRaw); // 기존 단일 alias 흐름
+  if (!k) return;
+  keys = [k];
+}
 
 function buildReverseAliasMap(aliasMap) {
   const rev = new Map(); // canonicalKey -> Set(aliasText)
@@ -1844,7 +1855,7 @@ function buildReverseAliasMap(aliasMap) {
 }
 
 
-const foundList = data.stations.filter(s => normStationKey(s.key || s.name || "") === key);
+const foundList = data.stations.filter(s => keys.includes(normStationKey(s.key || s.name || "")));
   if (foundList.length === 0) {
     alert("정확히 일치하는 역명을 찾을 수 없습니다.");
     return;
