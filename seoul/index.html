@@ -70,7 +70,14 @@ body {
   border-radius: 8px;
 }
 .line-item:hover { background: rgba(0,0,0,.035); }
-.line-dot { width: 14px; height: 14px; border-radius: 50%; border: 1px solid #ddd; }
+.line-dot {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  border: none;
+  border-radius: 0;
+  display: block;
+}
 .count { font-variant-numeric: tabular-nums; color: #333; }
 
 /* ==========================================================
@@ -559,52 +566,27 @@ window.clearOverpassCache = async function deleteOverpassDB() {
       }
     } catch {}
   }
-async function fetchOverpass(overpassQuery) {
-  const body = "data=" + encodeURIComponent(overpassQuery);
-  let lastErr = null;
+  async function fetchOverpassJSON(url, options) {
+  const resp = await fetch(url, options);
+  const text = await resp.text();
 
-  for (const url of ENDPOINTS) {
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
-        },
-        body,
-      });
-
-      const text = await res.text();
-      console.log("OVERPASS status:", res.status, "via", url);
-      console.log("OVERPASS head:", text.slice(0, 300));
-
-      if (!res.ok) {
-        const err = new Error(`Overpass HTTP ${res.status} via ${url}: ${text.slice(0, 200)}`);
-        lastErr = err;
-        if (res.status >= 500) continue;
-        throw err;
-      }
-
-      const t = text.trimStart();
-      if (!(t.startsWith("{") || t.startsWith("["))) {
-        const err = new Error(`Overpass non-JSON via ${url}: ${t.slice(0, 200)}`);
-        lastErr = err;
-        continue;
-      }
-
-      return JSON.parse(text);
-    } catch (e) {
-      console.error("[Overpass failed]", url, e);
-      lastErr = e;
-      continue;
-    }
+  if (!resp.ok) {
+    console.warn("[Overpass] HTTP", resp.status, text.slice(0, 120));
+    throw new Error("Overpass HTTP " + resp.status);
   }
 
-  throw lastErr || new Error("All Overpass endpoints failed.");
+  const t = text.trimStart();
+  if (!(t.startsWith("{") || t.startsWith("["))) {
+    console.warn("[Overpass] Non-JSON response head:", t.slice(0, 120));
+    throw new Error("Overpass returned non-JSON");
+  }
+
+  return JSON.parse(text);
 }
 
 
   const data = await fetchOverpass(query); // 기존 함수 그대로 사용
-		  console.log("[Overpass query raw]", JSON.stringify(overpassQuery));
+    console.log("[Overpass query raw]", JSON.stringify(overpassQuery));
   console.log("[Overpass query length]", overpassQuery?.length);
 
   const body = "data=" + encodeURIComponent(overpassQuery);
@@ -1217,18 +1199,53 @@ totalStationsCount = uniq.size;
     /* ------------------------------------------------ */
     /* PC 환경: 사이드바 업데이트 함수 (기존 로직) */
     /* ------------------------------------------------ */
-    function updateSidebar(){
-      const container=document.getElementById('lineList');
-      container.innerHTML='';
-      const entries=sortLineEntries(Object.entries(lineStats));
-      entries.forEach(([name,s])=>{
-        const div=document.createElement('div');
-        div.className='line-item';
-        // PC 사이드바에서는 발견 역 개수를 표시합니다.
-        div.innerHTML=`<div class='line-dot' style='background:${s.color}'></div><div>${name}</div><div class='count'>${s.matched} / ${s.total}</div>`;
-        container.appendChild(div);
-      });
-    }
+const lineIconMap = {
+  "1호선": "./images/1.png",
+  "2호선": "./images/2.png",
+  "3호선": "./images/3.png",
+  "4호선": "./images/4.png",
+  "5호선": "./images/5.png",
+  "6호선": "./images/6.png",
+  "7호선": "./images/7.png",
+  "8호선": "./images/8.png",
+  "9호선": "./images/9.png",
+  "GTX-A": "./images/GTX-A.png",
+  "김포골드라인": "./images/Gimpo.png",
+  "용인경전철": "./images/Everline.png",
+  "의정부경전철": "./images/U.png",
+  "인천1호선": "./images/Incheon1.png",
+  "인천2호선": "./images/Incheon2.png",
+  "서해선": "./images/Seohae.png",
+  "신분당선": "./images/Shinbundang.png",
+  "수인·분당선": "./images/Suin-Bundang.png",
+  "경강선": "./images/Gyeonggang.png",
+  "경춘선": "./images/Gyeongchun.png",
+  "경의·중앙선": "./images/Gyeongui-Jungang.png",
+  "공항철도": "./images/Arex.png",
+  "신림선": "./images/Sillim.png",
+  "우이신설선": "./images/Ui.png",
+  "인천공항자기부상열차": "./images/Maglev.png",
+
+};
+
+function updateSidebar(){
+  const container = document.getElementById('lineList');
+  container.innerHTML = '';
+  const entries = sortLineEntries(Object.entries(lineStats));
+
+  entries.forEach(([name, s]) => {
+    const icon = lineIconMap[name] || "./images/default.png";
+
+    const div = document.createElement('div');
+    div.className = 'line-item';
+    div.innerHTML = `
+      <img class="line-dot" src="${icon}" alt="">
+      <div>${name}</div>
+      <div class="count">${s.matched} / ${s.total}</div>
+    `;
+    container.appendChild(div);
+  });
+}
     
 	const MAX_DISTANCE_SQ = 0.000004; // 0.002 * 0.002 = 0.000004 (경위도 제곱 거리)
 
