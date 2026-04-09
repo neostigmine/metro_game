@@ -604,6 +604,12 @@ async function fetchOverpass(overpassQuery) {
 
 
   const data = await fetchOverpass(query); // 기존 함수 그대로 사용
+		  console.log("[Overpass query raw]", JSON.stringify(overpassQuery));
+  console.log("[Overpass query length]", overpassQuery?.length);
+
+  const body = "data=" + encodeURIComponent(overpassQuery);
+  console.log("[Overpass body head]", body.slice(0, 200));
+
   try {
     localStorage.setItem(cacheKey, JSON.stringify({ savedAt: now, data }));
     console.log("[cache] saved", cacheKey);
