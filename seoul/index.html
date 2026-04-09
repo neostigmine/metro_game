@@ -559,22 +559,47 @@ window.clearOverpassCache = async function deleteOverpassDB() {
       }
     } catch {}
   }
-  async function fetchOverpassJSON(url, options) {
-  const resp = await fetch(url, options);
-  const text = await resp.text();
+async function fetchOverpass(overpassQuery) {
+  const body = "data=" + encodeURIComponent(overpassQuery);
+  let lastErr = null;
 
-  if (!resp.ok) {
-    console.warn("[Overpass] HTTP", resp.status, text.slice(0, 120));
-    throw new Error("Overpass HTTP " + resp.status);
+  for (const url of ENDPOINTS) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+        },
+        body,
+      });
+
+      const text = await res.text();
+      console.log("OVERPASS status:", res.status, "via", url);
+      console.log("OVERPASS head:", text.slice(0, 300));
+
+      if (!res.ok) {
+        const err = new Error(`Overpass HTTP ${res.status} via ${url}: ${text.slice(0, 200)}`);
+        lastErr = err;
+        if (res.status >= 500) continue;
+        throw err;
+      }
+
+      const t = text.trimStart();
+      if (!(t.startsWith("{") || t.startsWith("["))) {
+        const err = new Error(`Overpass non-JSON via ${url}: ${t.slice(0, 200)}`);
+        lastErr = err;
+        continue;
+      }
+
+      return JSON.parse(text);
+    } catch (e) {
+      console.error("[Overpass failed]", url, e);
+      lastErr = e;
+      continue;
+    }
   }
 
-  const t = text.trimStart();
-  if (!(t.startsWith("{") || t.startsWith("["))) {
-    console.warn("[Overpass] Non-JSON response head:", t.slice(0, 120));
-    throw new Error("Overpass returned non-JSON");
-  }
-
-  return JSON.parse(text);
+  throw lastErr || new Error("All Overpass endpoints failed.");
 }
 
 
@@ -1425,6 +1450,7 @@ if (subwayData.lines.length === 0) {
 }
 
 drawLines(subwayData.lines);
+fillLineStopsByProximityFor("1호선");
 computeTotals();
 drawBaseMarkers(subwayData.stations);
 restoreFoundMarkersFromProgress();
@@ -1656,6 +1682,7 @@ window.MANUAL_ALIAS = new Map([
   [normStationKey("경인여자대학교"), normStationKey("계산")],
   [normStationKey("상록호텔조리직업전문학교"), normStationKey("경인교대입구")],
   [normStationKey("인천세종병원"), normStationKey("작전")],
+  [normStationKey(""), normStationKey("갈산")],
   [normStationKey("세림병원"), normStationKey("부평구청")],
   [normStationKey("한길안과병원"), normStationKey("부평시장")],
   [normStationKey("연세와병원"), normStationKey("인천시청")],
