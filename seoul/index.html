@@ -177,27 +177,193 @@ body {
 
 /* 모바일에서만 표시 + "지도 밖 레이어"로 고정 */
 @media (max-width: 768px) {
+.dashboard.dashboard-collapsed .line-buttons,
+.dashboard.dashboard-expanded .line-buttons {
+  display: flex;
+}
+
+.dashboard.dashboard-collapsed {
+  padding-bottom: 8px;
+}
+
+.dashboard.dashboard-expanded {
+  padding-bottom: 10px;
+}
+
+.dashboard.dashboard-expanded .line-buttons {
+  display: flex;
+}
+
+.collapsed-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: none;
+  overflow: visible;
+}
+
+.collapsed-line-button {
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
+  border: none;
+  border-radius: 50%;
+  padding: 0;
+  background: conic-gradient(
+    #ffffff 0turn calc(var(--progress, 0) / 100 * 1turn),
+    rgba(255,255,255,.18) calc(var(--progress, 0) / 100 * 1turn) 1turn
+  );
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,.15);
+}
+
+.collapsed-line-button .line-button-inner {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--line-color, #666);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.collapsed-line-button img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  display: block;
+}
+
+.mobile-line-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(0,0,0,.04);
+  pointer-events: auto;
+}
+
+.mobile-line-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mobile-line-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
+.mobile-line-name {
+  font-size: 13px;
+  color: #111;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mobile-line-count {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: #333;
+  flex: 0 0 auto;
+}
+	.line-buttons {
+	  display: flex;
+	  flex-direction: column;
+	  gap: 6px;
+	  max-height: 240px;
+	  overflow-y: auto;
+	  padding-bottom: 5px;
+	}
+
+	.mobile-line-item {
+	  display: flex;
+	  align-items: center;
+	  justify-content: space-between;
+	  gap: 10px;
+	  padding: 8px 10px;
+	  border-radius: 10px;
+	  background: rgba(0,0,0,.04);
+	  pointer-events: auto;
+	}
+
+	.mobile-line-left {
+	  display: flex;
+	  align-items: center;
+	  gap: 8px;
+	  min-width: 0;
+	}
+
+	.mobile-line-icon {
+	  width: 18px;
+	  height: 18px;
+	  object-fit: contain;
+	  flex: 0 0 auto;
+	}
+
+	.mobile-line-name {
+	  font-size: 13px;
+	  color: #111;
+	  white-space: nowrap;
+	  overflow: hidden;
+	  text-overflow: ellipsis;
+	}
+
+	.mobile-line-count {
+	  font-size: 13px;
+	  font-variant-numeric: tabular-nums;
+	  color: #333;
+	  flex: 0 0 auto;
+	}
+
+
+	.dashboard.dashboard-expanded .line-buttons {
+	  display: flex;
+	}
+
+	.dashboard.dashboard-collapsed {
+	  padding-bottom: 8px;
+	}
+
+	.dashboard.dashboard-expanded {
+	  padding-bottom: 10px;
+	}
 	.dashboard-top-row {
 	  display: flex;
 	  align-items: center;
+	  justify-content: space-between;
 	  gap: 10px;
 	  margin-bottom: 6px;
 	  pointer-events: auto;
 	}
-	.hamburger-button {
+
+	.arrow-toggle-button {
 	  width: 42px;
 	  height: 42px;
 	  border: 1px solid rgba(0,0,0,.15);
 	  border-radius: 12px;
 	  background: rgba(255,255,255,.95);
 	  color: #111;
-	  font-size: 22px;
+	  font-size: 24px;
 	  line-height: 1;
 	  display: inline-flex;
 	  align-items: center;
 	  justify-content: center;
 	  cursor: pointer;
 	  flex: 0 0 auto;
+	}
+
+	.arrow-toggle-button.open {
+	  transform: rotate(180deg);
 	}
 	.completion-rate {
 	  margin-bottom: 0;
@@ -261,23 +427,26 @@ body {
 	  transition: opacity 0.2s;
 	  box-shadow: 0 1px 3px rgba(0,0,0,.15);
 	}
-	.main-lines .line-button {
-	  position: relative;
-	  width: 46px;
-	  height: 46px;
-	  border-radius: 50%;
-	  padding: 0;
-	  background: conic-gradient(
-		#fff calc(var(--progress, 0) * 1%),
-		rgba(255,255,255,.22) 0
-	  );
-	  display: inline-flex;
-	  align-items: center;
-	  justify-content: center;
-	}
+.main-lines .line-button {
+  position: relative;
+  width: 50px;
+  height: 50px;
+  border: none;
+  border-radius: 50%;
+  padding: 0;
+  background: conic-gradient(
+    #ffffff 0turn calc(var(--progress, 0) / 100 * 1turn),
+    rgba(255,255,255,.18) calc(var(--progress, 0) / 100 * 1turn) 1turn
+  );
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,.15);
+}
+
 	.main-lines .line-button .line-button-inner {
-	  width: 38px;
-	  height: 38px;
+	  width: 40px;
+	  height: 40px;
 	  border-radius: 50%;
 	  background: var(--line-color, #666);
 	  color: white;
@@ -288,14 +457,38 @@ body {
 	  font-weight: 800;
 	  line-height: 1;
 	}
-	.other-lines .line-button {
-	  border-radius: 20px;
-	  font-size: 12px;
-	  padding: 6px 12px;
-	  min-width: 60px;
-	  color: white;
-	  font-weight: 700;
+.other-lines .line-button {
+  width: 52px;
+  height: 52px;
+  min-width: 52px;
+  min-height: 52px;
+  border-radius: 50%;
+  padding: 0;
+  background: conic-gradient(
+    #ffffff 0turn calc(var(--progress, 0) / 100 * 1turn),
+    rgba(255,255,255,.18) calc(var(--progress, 0) / 100 * 1turn) 1turn
+  );
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,.15);
+}
+
+	.other-lines .line-button .line-button-inner {
+	  width: 42px;
+	  height: 42px;
+	  border-radius: 50%;
 	  background: var(--line-color, #666);
+	  display: flex;
+	  align-items: center;
+	  justify-content: center;
+	}
+
+	.other-lines .line-button img {
+	  width: 26px;
+	  height: 26px;
+	  object-fit: contain;
+	  display: block;
 	}
   .search-box {
     display: flex;
@@ -351,13 +544,16 @@ body {
     <div id="lineList"></div>
   </div>
 
-  <div class="dashboard">
+<div class="dashboard">
+  <div class="dashboard-top-row">
     <div class="completion-rate">
       <span class="rate-number" id="totalRate">0.0 %</span>
       <span class="rate-text">역 발견됨</span>
     </div>
-    <div class="line-buttons" id="lineButtons"></div>
+    <button id="mobileSidebarToggle" class="arrow-toggle-button" type="button" aria-label="노선 목록 열기">⌄</button>
   </div>
+  <div class="line-buttons" id="lineButtons"></div>
+</div>
 
   <div class="search-box">
     <input type="text" id="stationSearchMobile" placeholder="역 이름을 입력" class="station-input" />
@@ -1295,10 +1491,22 @@ const lineIconMap = {
   "인천공항자기부상열차": "./images/Maglev.png",
 
 };
-
-function updateSidebar(){
+function updateSidebar() {
   const container = document.getElementById('lineList');
+  const summary = document.getElementById('sidebarSummary');
+  if (!container) return;
+
   container.innerHTML = '';
+
+  matchedStationsCount = 0;
+  Object.values(lineStats).forEach(s => {
+    matchedStationsCount += s.matched || 0;
+  });
+
+  if (summary) {
+    summary.textContent = `맞춘 역 개수: ${matchedStationsCount} / ${totalStationsCount}`;
+  }
+
   const entries = sortLineEntries(Object.entries(lineStats));
 
   entries.forEach(([name, s]) => {
@@ -1307,7 +1515,7 @@ function updateSidebar(){
     const div = document.createElement('div');
     div.className = 'line-item';
     div.innerHTML = `
-      <img class="line-dot" src="${icon}" alt="">
+      <img class="line-dot" src="${icon}" alt="${name}">
       <div>${name}</div>
       <div class="count">${s.matched} / ${s.total}</div>
     `;
@@ -1350,63 +1558,77 @@ function nearbyLinesForStation(station){
     /* ------------------------------------------------ */
     /* 모바일 환경: 대시보드 업데이트 함수 (새로운 로직) */
     /* ------------------------------------------------ */
+	
 	function updateDashboard() {
-	  const container = document.getElementById('lineButtons');
-	  if (!container) return;
+  const container = document.getElementById('lineButtons');
+  const dashboard = document.querySelector('.dashboard');
+  if (!container || !dashboard) return;
 
-	  container.innerHTML = '';
+  container.innerHTML = '';
 
-	  matchedStationsCount = 0;
-	  Object.values(lineStats).forEach(s => {
-		matchedStationsCount += s.matched;
-	  });
+  matchedStationsCount = 0;
+  Object.values(lineStats).forEach(s => {
+    matchedStationsCount += s.matched || 0;
+  });
 
-	  const totalRateElement = document.getElementById('totalRate');
-	  const rate = totalStationsCount > 0
-		? (matchedStationsCount / totalStationsCount) * 100
-		: 0;
+  const totalRateElement = document.getElementById('totalRate');
+  const rate = totalStationsCount > 0
+    ? (matchedStationsCount / totalStationsCount) * 100
+    : 0;
 
-	  if (totalRateElement) {
-		totalRateElement.textContent = `${rate.toFixed(1)} %`;
-	  }
+  if (totalRateElement) {
+    totalRateElement.textContent = `${rate.toFixed(1)} %`;
+  }
 
-	  const entries = sortLineEntries(Object.entries(lineStats));
+  const entries = sortLineEntries(Object.entries(lineStats));
+const expanded = isDashboardExpanded;
 
-	  const mainLinesDiv = document.createElement('div');
-	  mainLinesDiv.className = 'line-group main-lines';
+  if (!expanded) {
+    // 접힌 상태: 노선 아이콘만 보여주기
+    const iconGroup = document.createElement('div');
+    iconGroup.className = 'line-group collapsed-icons';
 
-	  const otherLinesDiv = document.createElement('div');
-	  otherLinesDiv.className = 'line-group other-lines';
+    entries.forEach(([name, s]) => {
+      const btn = document.createElement('button');
+      btn.className = 'line-button collapsed-line-button';
 
-	  entries.forEach(([name, s]) => {
-		const btn = document.createElement('button');
-		btn.className = 'line-button';
+      const progress = s.total > 0 ? (s.matched / s.total) * 100 : 0;
+      const icon = lineIconMap[name] || "./images/default.png";
 
-		const isMainLine =
-		  name.match(/^(\d+)호선$/) &&
-		  parseInt(name.match(/^(\d+)호선$/)[1], 10) <= 9;
+      btn.style.setProperty('--progress', progress);
+      btn.style.setProperty('--line-color', s.color || '#777');
 
-		const progress = s.total > 0 ? (s.matched / s.total) * 100 : 0;
+      btn.innerHTML = `
+        <span class="line-button-inner">
+          <img src="${icon}" alt="${name}">
+        </span>
+      `;
 
-		btn.style.setProperty('--progress', progress);
-		btn.style.setProperty('--line-color', s.color);
+      iconGroup.appendChild(btn);
+    });
 
-		if (isMainLine) {
-		  btn.innerHTML = `
-			<span class="line-button-inner">
-			  ${name.replace('호선', '')}
-			</span>
-		  `;
-		  mainLinesDiv.appendChild(btn);
-		} else {
-		  btn.textContent = name;
-		  otherLinesDiv.appendChild(btn);
-		}
-	  });
+    container.appendChild(iconGroup);
+    return;
+  }
 
-	  container.appendChild(mainLinesDiv);
-	  container.appendChild(otherLinesDiv);
-	}
+  // 펼친 상태: 노선별 맞춘 역 / 전체 역 개수
+  entries.forEach(([name, s]) => {
+    const item = document.createElement('div');
+    item.className = 'mobile-line-item';
+
+    const icon = lineIconMap[name] || "./images/default.png";
+
+    item.innerHTML = `
+      <div class="mobile-line-left">
+        <img class="mobile-line-icon" src="${icon}" alt="${name}">
+        <span class="mobile-line-name">${name}</span>
+      </div>
+      <div class="mobile-line-count">${s.matched} / ${s.total}</div>
+    `;
+
+    container.appendChild(item);
+  });
+}
     /* ------------------------------------------------ */
     /* 통합 업데이트 함수 (환경에 따라 호출) */
     /* ------------------------------------------------ */
@@ -1570,47 +1792,42 @@ catch(e){alert('초기화 오류: '+e.message);console.error(e);} }
     // ********* 검색 입력 처리 로직 수정 *********
     const inputPC = document.getElementById('stationSearchPC');
     const inputMobile = document.getElementById('stationSearchMobile');
+const dashboard = document.querySelector('.dashboard');
+const mobileDashboardToggle = document.getElementById('mobileSidebarToggle');
 
-const sidebar = document.getElementById('sidebar');
-const mobileSidebarToggle = document.getElementById('mobileSidebarToggle');
+let isDashboardExpanded = false;
 
-function closeMobileSidebar() {
-  if (!sidebar) return;
-  sidebar.classList.remove('mobile-open');
+function renderDashboardState() {
+  if (!dashboard) return;
+
+  dashboard.classList.toggle('dashboard-expanded', isDashboardExpanded);
+  dashboard.classList.toggle('dashboard-collapsed', !isDashboardExpanded);
+
+  if (mobileDashboardToggle) {
+    mobileDashboardToggle.classList.toggle('open', isDashboardExpanded);
+  }
+
+  updateDashboard();
 }
 
-function toggleMobileSidebar() {
-  if (!sidebar) return;
-  sidebar.classList.toggle('mobile-open');
-  updateSidebar();
-}
-
-if (mobileSidebarToggle) {
-  mobileSidebarToggle.addEventListener('click', (e) => {
+function toggleDashboard(e) {
+  if (e) {
+    e.preventDefault();
     e.stopPropagation();
-    toggleMobileSidebar();
-  });
+  }
+
+  isDashboardExpanded = !isDashboardExpanded;
+  renderDashboardState();
 }
 
-// 사이드바 바깥 누르면 닫기
-document.addEventListener('click', (e) => {
-  if (window.innerWidth > 768) return;
-  if (!sidebar || !sidebar.classList.contains('mobile-open')) return;
+if (mobileDashboardToggle) {
+  mobileDashboardToggle.removeEventListener('click', toggleDashboard);
+  mobileDashboardToggle.addEventListener('click', toggleDashboard);
+}
 
-  const clickedInsideSidebar = sidebar.contains(e.target);
-  const clickedToggle = mobileSidebarToggle && mobileSidebarToggle.contains(e.target);
+// 초기값
+renderDashboardState();
 
-  if (!clickedInsideSidebar && !clickedToggle) {
-    closeMobileSidebar();
-  }
-});
-
-// 화면 커지면 모바일 사이드바 닫기
-window.addEventListener('resize', () => {
-  if (window.innerWidth > 768) {
-    closeMobileSidebar();
-  }
-});
 
 function pickClosestLineNameForStation(st, lineNames) {
   const data = window.subwayData;
